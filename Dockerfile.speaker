@@ -1,0 +1,27 @@
+FROM node:23-slim
+
+# Install Python and build dependencies
+RUN apt-get update && apt-get install -y \
+    python3 \
+    python3-pip \
+    build-essential \
+    && rm -rf /var/lib/apt/lists/*
+
+# Set Python environment variable for node-gyp
+ENV PYTHON=/usr/bin/python3
+
+WORKDIR /app
+
+# Copy package files and install dependencies
+COPY package*.json ./
+RUN npm install
+
+# Copy source code
+COPY src/ ./src/
+COPY .env ./
+
+# Expose the Speaker port
+EXPOSE 8000
+
+# Start the Speaker server
+CMD ["node", "src/speaker/server.js"]

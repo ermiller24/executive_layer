@@ -1,0 +1,115 @@
+# Executive Interrupting Rectifier (EIR) - Progress Log
+
+## 2025-03-05
+- Analyzed design document and understood project requirements
+- Created basic project structure
+- Created docker-compose.yml with services for:
+  - API (OpenAI-compatible bridge)
+  - Speaker LLM
+  - Executive LLM
+  - Vector Store
+  - Neo4j (knowledge graph)
+- Implemented core components:
+  - OpenAI-compatible API bridge (server.js, chat.js, embedding.js)
+  - Speaker LLM service
+  - Executive LLM service with knowledge graph integration
+  - Vector Store service
+- Added support for critical OpenAI API features:
+  - Tool calling (both streaming and non-streaming)
+  - Structured JSON output (response_format parameter)
+  - Streaming (already implemented)
+- Created Dockerfiles for all services
+- Created test script (test_api.js) to verify API functionality, including tests for:
+  - Basic chat completions
+  - Embeddings
+  - Streaming
+  - Tool calling
+  - Streaming tool calling
+  - JSON mode
+- Created comprehensive README.md with documentation and instructions
+- Added Makefile with common commands for easier deployment and management:
+  - make deploy - Build and start all services
+  - make stop - Stop all services
+  - make restart - Restart all services
+  - make logs - View logs from all services
+  - make test - Run the test script
+  - make clean - Remove containers and volumes
+  - make build - Build all Docker images
+  - make status - Check the status of all services
+  - make install - Install Node.js dependencies
+  - make dev - Start services in development mode
+- Implemented Python chatbot for easy testing and demonstration:
+  - Uses Langchain to connect to the EIR system
+  - Supports both langchain-openai and openlm integrations
+  - Provides a simple command-line interface
+  - Streams responses in real-time
+  - Added make commands for Python environment setup and chatbot execution
+- Updated Speaker and Executive services to use initChatModel:
+  - Replaced direct ChatOpenAI instantiation with initChatModel
+  - Added support for different model providers (not just OpenAI)
+  - Updated environment variables to include model provider and API base options
+  - Updated docker-compose.yml to pass the new environment variables
+- Refactored Neo4j implementation to align with reference implementation:
+  - Created Neo4jManager class in knowledge/neo4j-manager.js
+  - Exposed Neo4j functionality as tool calls in knowledge/knowledge-tools.js
+  - Updated executive service to use knowledge tools instead of direct Neo4j interactions
+  - Bound knowledge tools to the LLM for direct interaction with the knowledge graph
+  - Implemented proper schema initialization for Neo4j
+  - Added support for creating nodes, edges, altering nodes, and searching the graph
+- Implemented credential management system:
+  - Added support for loading default credentials from environment variables
+  - Added ability to override credentials at runtime via API headers
+  - Updated API server to pass credentials to Speaker and Executive services
+  - Updated Vector Store service to accept API keys for embedding generation
+  - Updated Python chatbot to support command-line arguments for credential overrides
+  - Added clear documentation of credential options in README.md
+
+### Next Steps:
+1. Test the API bridge individually
+2. Test the Speaker LLM service
+3. Test the Executive LLM service
+4. Test the Vector Store service
+5. Test the integrated system
+6. Add error handling and logging
+7. Optimize performance
+
+### Future Enhancements:
+1. Add support for file processing and vision capabilities:
+   - Update API bridge to handle file uploads and attachments in chat completions
+   - Modify Speaker service to process files if the backend LLM supports it
+   - Update streaming implementation to handle file-related responses
+   - Add file handling to the Python chatbot
+2. Implement the extensions mentioned in the design document:
+   - Managed Docker instance for sandboxed computations
+   - Automatic prompt extension for longer conversations
+   - Different models for Speaker and Executive
+   - Multiple Executive models running simultaneously
+
+### Notes:
+- The implementation follows the design document's flow
+- The Executive LLM can interrupt or restart the Speaker LLM based on its evaluation
+- The Vector Store provides context for the Speaker LLM
+- The Neo4j knowledge graph provides information for the Executive LLM
+- All components are packaged behind an OpenAI-compatible API
+- No extensions have been implemented as decisions are still pending
+- The API supports all critical OpenAI features: tool calling, JSON mode, and streaming
+- The Makefile makes it easy to deploy and manage the system with simple commands
+- The Python chatbot provides an easy way to test and demonstrate the system
+- File processing and vision capabilities are not currently implemented
+- The system now supports different model providers through initChatModel
+- The Neo4j knowledge graph is now implemented as tool calls bound to the LLM
+- The Executive LLM can now directly interact with the knowledge graph through tool calls
+- The knowledge graph structure follows the reference implementation
+- The credential management system allows for flexible deployment scenarios:
+  - Default credentials can be set in the .env file for easy deployment
+  - Credentials can be overridden at runtime for testing different models/providers
+  - The Python chatbot supports command-line arguments for credential overrides
+
+### Testing Instructions:
+1. Set up environment variables in .env file
+2. Run `make deploy` to build and start all services
+3. Run `make test` to verify API functionality
+4. Run `make chatbot` to start the Python chatbot for interactive testing
+5. Test with real OpenAI API clients by pointing them to http://localhost:3000
+6. Use `make logs` to view logs from all services
+7. Use `make stop` to stop all services when done

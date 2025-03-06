@@ -1,0 +1,113 @@
+version: '3.8'
+
+services:
+  api:
+    build:
+      context: .
+      dockerfile: Dockerfile.api
+    image: eir-api
+    ports:
+      - "3000:3000"  # Expose the OpenAI-compatible API
+    environment:
+      - SPEAKER_URL=http://speaker:8000
+      - EXECUTIVE_URL=http://executive:8001
+      - VECTOR_STORE_URL=http://vector_store:8002
+      - DEFAULT_API_KEY=${DEFAULT_API_KEY}
+      - DEFAULT_SPEAKER_MODEL=${SPEAKER_MODEL}
+      - DEFAULT_SPEAKER_MODEL_PROVIDER=${SPEAKER_MODEL_PROVIDER}
+      - DEFAULT_SPEAKER_API_KEY=${SPEAKER_API_KEY}
+      - DEFAULT_SPEAKER_API_BASE=${SPEAKER_API_BASE}
+      - DEFAULT_EXECUTIVE_MODEL=${EXECUTIVE_MODEL}
+      - DEFAULT_EXECUTIVE_MODEL_PROVIDER=${EXECUTIVE_MODEL_PROVIDER}
+      - DEFAULT_EXECUTIVE_API_KEY=${EXECUTIVE_API_KEY}
+      - DEFAULT_EXECUTIVE_API_BASE=${EXECUTIVE_API_BASE}
+    networks:
+      - eir_net
+    depends_on:
+      - speaker
+      - executive
+      - vector_store
+
+  speaker:
+    build:
+      context: .
+      dockerfile: Dockerfile.speaker
+    image: eir-speaker
+    environment:
+      - PORT=8000
+      - SPEAKER_PORT=8000
+      - SPEAKER_MODEL=${SPEAKER_MODEL}
+      - SPEAKER_MODEL_PROVIDER=${SPEAKER_MODEL_PROVIDER}
+      - SPEAKER_API_KEY=${SPEAKER_API_KEY}
+      - SPEAKER_API_BASE=${SPEAKER_API_BASE}
+      - VECTOR_STORE_URL=http://vector_store:8002
+    networks:
+      - eir_net
+    depends_on:
+      - vector_store
+
+  executive:
+    build:
+      context: .
+      dockerfile: Dockerfile.executive
+    image: eir-executive
+    environment:
+      - PORT=8001
+      - EXECUTIVE_PORT=8001
+      - EXECUTIVE_MODEL=${EXECUTIVE_MODEL}
+      - EXECUTIVE_MODEL_PROVIDER=${EXECUTIVE_MODEL_PROVIDER}
+      - EXECUTIVE_API_KEY=${EXECUTIVE_API_KEY}
+      - EXECUTIVE_API_BASE=${EXECUTIVE_API_BASE}
+      - NEO4J_URL=bolt://neo4j:7687  # This is the internal container port, which remains unchanged
+      - NEO4J_USER=${NEO4J_USER}
+      - NEO4J_PASSWORD=${NEO4J_PASSWORD}
+      - VECTOR_STORE_URL=http://vector_store:8002
+    networks:
+      - eir_net
+    depends_on:
+      neo4j:
+        condition: service_healthy
+      vector_store:
+        condition: service_started
+
+  vector_store:
+    build:
+      context: .
+      dockerfile: Dockerfile.vector_store
+    image: eir-vector_store
+    environment:
+      - PORT=8002
+      - VECTOR_STORE_PORT=8002
+      - VECTOR_STORE_DIMENSION=${VECTOR_STORE_DIMENSION}
+      - VECTOR_STORE_PATH=${VECTOR_STORE_PATH}
+      - SPEAKER_API_KEY=${SPEAKER_API_KEY}
+    volumes:
+      - vector_data:/data
+    networks:
+      - eir_net
+
+  neo4j:
+    image: neo4j:2025.02.0
+    environment:
+      - NEO4J_AUTH=${NEO4J_USER}/${NEO4J_PASSWORD}
+    ports:
+      - "7475:7474"  # HTTP - changed from 7474 to avoid conflicts
+      - "7688:7687"  # Bolt - changed from 7687 to avoid conflicts
+    volumes:
+      - neo4j_data:/data
+    networks:
+      - eir_net
+    healthcheck:
+      test: ["CMD-SHELL", "wget --no-verbose --tries=1 --spider http://localhost:7474 || exit 1"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
+      start_period: 30s
+
+networks:
+  eir_net:
+    driver: bridge
+
+volumes:
+  neo4j_data:
+  vector_data:

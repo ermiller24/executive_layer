@@ -1,0 +1,24 @@
+{
+  "name": "executive-interrupting-rectifier",
+  "version": "0.1.0",
+  "description": "An operability layer that provides executive thinking, course correction, contextual knowledge, and advanced planning capabilities on top of an arbitrary LLM",
+  "main": "src/api/server.js",
+  "scripts": {
+    "start": "node src/api/server.js",
+    "dev": "nodemon src/api/server.js",
+    "test": "jest"
+  },
+  "dependencies": {
+    "@langchain/openai": "^0.0.14",
+    "axios": "^1.6.2",
+    "dotenv": "^16.3.1",
+    "express": "^4.18.2",
+    "langchain": "^0.3.0",
+    "neo4j-driver": "^5.15.0",
+    "hnswlib-node": "^1.4.2"
+  },
+  "devDependencies": {
+    "jest": "^29.7.0",
+    "nodemon": "^3.0.2"
+  }
+}
