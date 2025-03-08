@@ -22,6 +22,9 @@ help:
 	@echo "  make restart       - Restart all services"
 	@echo "  make logs          - View logs from all services"
 	@echo "  make test          - Run the test script"
+	@echo "  make test-vector   - Run vector store integration test"
+	@echo "  make test-exec     - Run knowledge graph integration test"
+	@echo "  make test-interaction - Run speaker-executive interaction test"
 	@echo "  make clean         - Remove containers and volumes"
 	@echo "  make build         - Build all Docker images"
 	@echo "  make status        - Check the status of all services"
@@ -65,7 +68,6 @@ redeploy:
 logs:
 	@echo "Viewing logs from all services..."
 	$(DOCKER_COMPOSE) logs -f
-
 # Run the test script
 .PHONY: test
 test:
@@ -75,6 +77,36 @@ test:
 		npm install; \
 	fi
 	node test_api.js
+
+# Run the vector store integration test
+.PHONY: test-vector
+test-vector:
+	@echo "Running vector store integration test..."
+	@if [ ! -d "node_modules" ]; then \
+		echo "Installing dependencies..."; \
+		npm install; \
+	fi
+	node test_vector_store.js
+
+# Run the vector store integration test
+.PHONY: test-exec
+test-exec:
+	@echo "Running knowledge graph integration test..."
+	@if [ ! -d "node_modules" ]; then \
+		echo "Installing dependencies..."; \
+		npm install; \
+	fi
+	node test_knowledge_graph.js
+
+# Run the executive interaction test
+.PHONY: test-interaction
+test-interaction:
+	@echo "Running speaker-executive interaction test..."
+	@if [ ! -d "node_modules" ]; then \
+		echo "Installing dependencies..."; \
+		npm install; \
+	fi
+	node test_executive_interaction.js
 
 # Remove containers and volumes
 .PHONY: clean
@@ -142,9 +174,7 @@ chatbot:
 	$(PYTHON) chatbot.py
 
 # Individual service logs
-.PHONY: logs-api logs-speaker logs-executive logs-vector-store logs-neo4j
-logs-api:
-	$(DOCKER_COMPOSE) logs -f api
+.PHONY: logs-speaker logs-executive logs-vector-store logs-neo4j
 
 logs-speaker:
 	$(DOCKER_COMPOSE) logs -f speaker
@@ -153,7 +183,7 @@ logs-executive:
 	$(DOCKER_COMPOSE) logs -f executive
 
 logs-vector-store:
-	$(DOCKER_COMPOSE) logs -f vector_store
+	$(DOCKER_COMPOSE) logs -f chroma
 
 logs-neo4j:
 	$(DOCKER_COMPOSE) logs -f neo4j

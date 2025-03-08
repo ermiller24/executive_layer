@@ -3,7 +3,7 @@
  * Handles all interactions with the Neo4j database for the EIR system
  */
 
-const neo4j = require('neo4j-driver');
+import neo4j from 'neo4j-driver';
 
 class Neo4jManager {
   /**
@@ -381,4 +381,4 @@ class Neo4jManager {
   }
 }
 
-module.exports = Neo4jManager;
+export default Neo4jManager;

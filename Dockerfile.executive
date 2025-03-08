@@ -23,5 +23,5 @@ COPY .env ./
 # Expose the Executive port
 EXPOSE 8001
 
-# Start the Executive server
-CMD ["node", "src/executive/server.js"]
+# Start the Executive server with ES modules support
+CMD ["node", "--experimental-specifier-resolution=node", "src/executive/server.js"]

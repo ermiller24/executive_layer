@@ -1,41 +1,27 @@
-require('dotenv').config();
-const express = require('express');
-const { ChatOpenAI } = require('@langchain/openai');
-const { StringOutputParser } = require('@langchain/core/output_parsers');
-const { RunnableSequence } = require('@langchain/core/runnables');
+import dotenv from 'dotenv';
+import express from 'express';
+import { StringOutputParser } from '@langchain/core/output_parsers';
+import { RunnableSequence } from '@langchain/core/runnables';
+import { initChatModel } from "langchain/chat_models/universal";
 
-// Helper function to initialize chat model with provider flexibility
-function initChatModel({ model, modelProvider, configurableFields, params }) {
-  // Currently only supporting OpenAI, but can be extended for other providers
-  return new ChatOpenAI({
-    modelName: model,
-    openAIApiKey: params.openAIApiKey,
-    openAIApiBase: params.openAIApiBase,
-    temperature: params.temperature,
-    streaming: params.streaming,
-    tools: params.tools
-  });
-}
-const axios = require('axios');
-const { 
-  initializeNeo4jManager, 
+import axios from 'axios';
+import {
+  initializeNeo4jManager,
   closeNeo4jManager,
   knowledgeTools,
   knowledgeToolSchemas
-} = require('../knowledge/knowledge-tools');
+} from '../knowledge/knowledge-tools.js';
 
+dotenv.config();
 const app = express();
 app.use(express.json());
 
 const PORT = process.env.EXECUTIVE_PORT || 8001;
-const MODEL = process.env.EXECUTIVE_MODEL || 'gpt-4o';
-const MODEL_PROVIDER = process.env.EXECUTIVE_MODEL_PROVIDER || 'openai';
-const API_KEY = process.env.EXECUTIVE_API_KEY;
-const API_BASE = process.env.EXECUTIVE_API_BASE;
+const MODEL = process.env.EXECUTIVE_MODEL || 'openai:gpt-4o';
+const MODEL_KWARGS = process.env.EXECUTIVE_MODEL_KWARGS ? JSON.parse(process.env.EXECUTIVE_MODEL_KWARGS) : {};
 const NEO4J_URL = process.env.NEO4J_URL || 'bolt://neo4j:7687';
 const NEO4J_USER = process.env.NEO4J_USER || 'neo4j';
 const NEO4J_PASSWORD = process.env.NEO4J_PASSWORD || 'password';
-const VECTOR_STORE_URL = process.env.VECTOR_STORE_URL || 'http://vector_store:8002';
 
 // Initialize the Neo4j manager
 initializeNeo4jManager(NEO4J_URL, NEO4J_USER, NEO4J_PASSWORD)
@@ -50,36 +36,78 @@ const tools = Object.entries(knowledgeToolSchemas).map(([name, schema]) => ({
 }));
 
 // Initialize the LLM using initChatModel for provider flexibility
-let llm;
-try {
-  llm = initChatModel({
-    model: MODEL,
-    modelProvider: MODEL_PROVIDER,
-    configurableFields: "any",
-    params: {
-      openAIApiKey: API_KEY,
-      openAIApiBase: API_BASE,
-      temperature: 0.2, // Lower temperature for more deterministic responses
-      tools: tools // Bind the knowledge tools to the LLM
-    }
-  });
-} catch (error) {
-  console.error('Error initializing LLM:', error);
-  // Create a fallback LLM that just returns a default response
-  llm = {
-    invoke: async () => ({ content: "I'm sorry, I couldn't process your request." })
-  };
-}
+const unbound_llm = await initChatModel(
+  MODEL,
+  MODEL_KWARGS
+);
+const llm = unbound_llm.bind(tools);
 
 // Health check endpoint
 app.get('/health', (req, res) => {
   res.status(200).json({ status: 'ok' });
 });
 
+// Debug endpoint - only accessible when debug mode is enabled
+const DEBUG = process.env.DEBUG === 'true';
+if (DEBUG) {
+  app.post('/debug/query', async (req, res) => {
+    try {
+      const { query, tool_params } = req.body;
+      
+      if (!query) {
+        return res.status(400).json({
+          error: {
+            message: 'Query is required',
+            type: 'invalid_request_error'
+          }
+        });
+      }
+      
+      // Create a system prompt for direct querying
+      const systemPrompt = `You are the Executive layer of an AI system. You have access to a knowledge graph and can use tools to interact with it.
+      
+You have access to the following tools to interact with the knowledge graph:
+- knowledge_create_node: Create a node in the knowledge graph
+- knowledge_create_edge: Create an edge between nodes in the knowledge graph
+- knowledge_alter: Alter or delete a node in the knowledge graph
+- knowledge_search: Search the knowledge graph using Cypher query components
+- knowledge_unsafe_query: Execute an arbitrary Cypher query against the Neo4j knowledge graph
+
+Respond to the user's query using these tools as needed.`;
+      
+      // Create a runnable sequence
+      const chain = RunnableSequence.from([
+        llm,
+        new StringOutputParser()
+      ]);
+      
+      // Invoke the chain
+      const result = await chain.invoke([
+        { type: 'system', content: systemPrompt },
+        { type: 'human', content: query }
+      ]);
+      
+      res.json({ result });
+    } catch (error) {
+      console.error('Error in debug query:', error);
+      res.status(500).json({
+        error: {
+          message: 'An error occurred during debug query',
+          type: 'server_error'
+        }
+      });
+    }
+  });
+}
+
+// The update_evaluation endpoint has been removed as it was only used for logging
+// and didn't provide significant value to the system.
+// The executive now only receives updates through the main /evaluate endpoint.
+
 // Evaluation endpoint
 app.post('/evaluate', async (req, res) => {
   try {
-    const { original_query, messages } = req.body;
+    const { original_query, messages, speaker_output } = req.body;
 
     if (!original_query || !messages || !Array.isArray(messages)) {
       return res.status(400).json({
@@ -90,6 +118,11 @@ app.post('/evaluate', async (req, res) => {
           code: 'invalid_request'
         }
       });
+    }
+    
+    // Log if we received speaker output
+    if (speaker_output) {
+      console.log(`[EVALUATE] Received speaker output (${speaker_output.length} chars) for evaluation`);
     }
 
     // Step 1: Search the knowledge graph for relevant information
@@ -104,7 +137,7 @@ app.post('/evaluate', async (req, res) => {
     // Step 2: Evaluate if the speaker is on the right track
     let evaluation;
     try {
-      evaluation = await evaluateSpeaker(original_query, messages, knowledgeDocument);
+      evaluation = await evaluateSpeaker(original_query, messages, knowledgeDocument, speaker_output);
     } catch (error) {
       console.error('Error evaluating speaker:', error);
       evaluation = {
@@ -122,21 +155,8 @@ app.post('/evaluate', async (req, res) => {
       // Continue even if updating the knowledge graph fails
     }
 
-    // Step 4: Store the knowledge document in the vector store if it's new
-    if (knowledgeDocument && knowledgeDocument.isNew) {
-      try {
-        await axios.post(`${VECTOR_STORE_URL}/store`, {
-          text: knowledgeDocument.content,
-          metadata: {
-            query: original_query,
-            timestamp: new Date().toISOString(),
-            source: 'executive'
-          }
-        });
-      } catch (error) {
-        console.warn('Error storing in vector store:', error.message);
-      }
-    }
+    // The executive no longer stores documents in the vector store
+    // The speaker is the sole owner of the vector store
 
     // Return the evaluation result
     res.json(evaluation);
@@ -242,19 +262,26 @@ async function searchKnowledgeGraph(query) {
  * @param {string} query - The user's query
  * @param {Array} messages - The conversation messages
  * @param {Object} knowledgeDocument - The knowledge document
+ * @param {string} speakerOutput - The current output from the speaker (if available)
  * @returns {Promise<Object>} - The evaluation result
  */
-async function evaluateSpeaker(query, messages, knowledgeDocument) {
+async function evaluateSpeaker(query, messages, knowledgeDocument, speakerOutput) {
   try {
     // Prepare the system prompt for the executive
     const systemPrompt = `You are the Executive layer of an AI system. Your job is to evaluate if the Speaker (the user-facing AI) is on the right track and provide guidance if needed.
 
 You have access to a knowledge graph and can provide corrections or additional information to the Speaker.
 
-Based on the user's query and any knowledge you have, evaluate if the Speaker needs:
+Based on the user's query, the Speaker's output, and any knowledge you have, evaluate if the Speaker needs:
 1. No intervention (if the Speaker is doing well)
 2. An interruption (if the Speaker has made minor errors or is slightly off track)
 3. A restart (if the Speaker is substantially wrong or has seriously deviated from the task)
+
+You should be more likely to intervene if:
+- The Speaker contradicts information in the knowledge graph
+- The Speaker provides factually incorrect information
+- The Speaker misunderstands the user's query
+- The Speaker goes off-topic or fails to address the user's needs
 
 You have access to the following tools to interact with the knowledge graph:
 - knowledge_create_node: Create a node in the knowledge graph
@@ -278,6 +305,11 @@ Respond with a JSON object with the following structure:
     // Add the conversation history
     for (const message of messages) {
       userMessage += `${message.role.toUpperCase()}: ${message.content}\n\n`;
+    }
+    
+    // Add the speaker's output if available
+    if (speakerOutput) {
+      userMessage += `\nCurrent Speaker Output:\n${speakerOutput}\n\n`;
     }
     
     // Add the knowledge document if available

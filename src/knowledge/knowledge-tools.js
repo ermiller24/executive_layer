@@ -3,7 +3,7 @@
  * Exposes Neo4j functionality as tool calls that can be bound to the LLM
  */
 
-const Neo4jManager = require('./neo4j-manager');
+import Neo4jManager from './neo4j-manager.js';
 
 let neo4jManager;
 
@@ -331,7 +331,7 @@ const knowledgeToolSchemas = {
   }
 };
 
-module.exports = {
+export {
   initializeNeo4jManager,
   getNeo4jManager,
   closeNeo4jManager,

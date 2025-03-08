@@ -1,4 +1,4 @@
-const axios = require('axios');
+import axios from 'axios';
 
 // Configuration
 const API_URL = 'http://localhost:3000';
@@ -33,30 +33,7 @@ async function testChatCompletions() {
   }
 }
 
-// Test the embeddings endpoint
-async function testEmbeddings() {
-  console.log('Testing embeddings endpoint...');
-  
-  try {
-    const response = await axios.post(`${API_URL}/v1/embeddings`, {
-      model: 'eir-embedding',
-      input: 'The quick brown fox jumps over the lazy dog.'
-    });
-    
-    console.log('Embeddings response:');
-    console.log(`Received ${response.data.data[0].embedding.length} dimensions`);
-    console.log('Embeddings test passed!');
-    return true;
-  } catch (error) {
-    console.error('Embeddings test failed:');
-    if (error.response) {
-      console.error(JSON.stringify(error.response.data, null, 2));
-    } else {
-      console.error(error.message);
-    }
-    return false;
-  }
-}
+// Embeddings test removed as it requires running within the Docker container
 
 // Test streaming chat completions
 async function testStreamingChat() {
@@ -315,36 +292,32 @@ async function runTests() {
     return;
   }
   
-  // Run the basic tests and chat completions
-  const embeddingsResult = await testEmbeddings();
+  // Run all tests
   const chatResult = await testChatCompletions();
-  
-  // Skip problematic tests that cause infinite loops or server errors
-  console.log('Skipping streaming chat test for now');
-  console.log('Skipping tool calling test for now');
-  console.log('Skipping streaming tool calling test for now');
-  console.log('Skipping JSON mode test for now');
-  
-  const streamingResult = false; // Skip for now
-  const toolCallingResult = false; // Skip for now
-  const streamingToolCallingResult = false; // Skip for now
-  const jsonModeResult = false; // Skip for now
+  const streamingResult = await testStreamingChat();
+  const toolCallingResult = await testToolCalling();
+  const streamingToolCallingResult = await testStreamingToolCalling();
+  const jsonModeResult = await testJsonMode();
   
   // Print summary
   console.log('\nTest Summary:');
   console.log('Chat Completions:', chatResult ? 'PASSED' : 'FAILED');
-  console.log('Embeddings:', embeddingsResult ? 'PASSED' : 'FAILED');
-  console.log('Streaming Chat: SKIPPED');
-  console.log('Tool Calling: SKIPPED');
-  console.log('Streaming Tool Calling: SKIPPED');
-  console.log('JSON Mode: SKIPPED');
+  console.log('Streaming Chat:', streamingResult ? 'PASSED' : 'FAILED');
+  console.log('Tool Calling:', toolCallingResult ? 'PASSED' : 'FAILED');
+  console.log('Streaming Tool Calling:', streamingToolCallingResult ? 'PASSED' : 'FAILED');
+  console.log('JSON Mode:', jsonModeResult ? 'PASSED' : 'FAILED');
+  console.log('Embeddings: SKIPPED (requires Docker container)');
   
-  if (embeddingsResult && chatResult) {
-    console.log('\nBasic tests passed! The API is partially working.');
-  } else if (embeddingsResult) {
-    console.log('\nOnly embeddings test passed. Chat completions still failing.');
+  const allPassed = chatResult && streamingResult &&
+                    toolCallingResult && streamingToolCallingResult && jsonModeResult;
+  const basicPassed = chatResult;
+  
+  if (allPassed) {
+    console.log('\nAll tests passed! The API is fully working.');
+  } else if (basicPassed) {
+    console.log('\nBasic tests passed, but some advanced features failed. Check the logs for details.');
   } else {
-    console.log('\nEven basic tests failed. Check the logs for details.');
+    console.log('\nSome basic tests failed. Check the logs for details.');
   }
 }
 

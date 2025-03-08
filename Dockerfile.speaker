@@ -1,5 +1,8 @@
 FROM node:23-slim
 
+# Accept build arguments
+ARG DEBUG=false
+
 # Install Python and build dependencies
 RUN apt-get update && apt-get install -y \
     python3 \
@@ -7,21 +10,23 @@ RUN apt-get update && apt-get install -y \
     build-essential \
     && rm -rf /var/lib/apt/lists/*
 
-# Set Python environment variable for node-gyp
+# Set environment variables
 ENV PYTHON=/usr/bin/python3
+ENV DEBUG=$DEBUG
 
 WORKDIR /app
 
 # Copy package files and install dependencies
 COPY package*.json ./
 RUN npm install
+RUN npm install chromadb
 
 # Copy source code
 COPY src/ ./src/
 COPY .env ./
 
-# Expose the Speaker port
-EXPOSE 8000
+# Expose the Speaker port (now serving as the API)
+EXPOSE 3000
 
-# Start the Speaker server
-CMD ["node", "src/speaker/server.js"]
+# Start the Speaker server with ES modules support
+CMD ["node", "--experimental-specifier-resolution=node", "src/speaker/server.js"]
