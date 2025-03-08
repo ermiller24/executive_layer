@@ -266,6 +266,14 @@
   - Included an optional integration test with the actual speaker API
   - This approach is more reliable as it doesn't depend on LLMs generating incorrect information
 
+## 2025-03-07 (Night)
+- Fixed streaming restart functionality in speaker service:
+  - Previously, when the executive requested a restart during streaming, the speaker would stop the stream but not start a new one
+  - Now, the speaker properly creates a new set of messages with the knowledge document
+  - Starts a new stream with the updated messages
+  - Sends the new stream's output to the client
+  - This makes the streaming restart behavior match the non-streaming behavior
+
 - Simplified architecture by removing the API service:
   - Made the speaker service the front-facing API
   - Moved OpenAI-compatible endpoints to the speaker service

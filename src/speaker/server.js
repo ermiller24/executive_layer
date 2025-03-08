@@ -530,7 +530,125 @@ async function handleChatRequest(messages, options, req, res) {
                 
                 res.write(`data: ${JSON.stringify(restartEvent)}\n\n`);
                 
-                // We'll break out of the streaming loop and let the final event be sent
+                // Create a new set of messages with the knowledge document
+                const updatedMessages = [...messages];
+                
+                // Add the knowledge document as a system message
+                updatedMessages.splice(updatedMessages.length - 1, 0, {
+                  role: 'system',
+                  content: `Updated information: ${knowledge_document}`
+                });
+                
+                // Convert to LangChain format
+                const updatedLangchainMessages = [];
+                for (const msg of updatedMessages) {
+                  if (msg.role === 'user') {
+                    updatedLangchainMessages.push(new HumanMessage(msg.content));
+                  } else if (msg.role === 'assistant') {
+                    updatedLangchainMessages.push(new AIMessage(msg.content));
+                  } else if (msg.role === 'system') {
+                    updatedLangchainMessages.push(new SystemMessage(msg.content));
+                  } else {
+                    updatedLangchainMessages.push(new HumanMessage(msg.content));
+                  }
+                }
+                
+                // Send a separator to indicate the start of the new response
+                const separatorEvent = {
+                  id: `separator-${Date.now()}`,
+                  object: 'chat.completion.chunk',
+                  created: Math.floor(Date.now() / 1000),
+                  model: MODEL,
+                  choices: [{
+                    index: 0,
+                    delta: {
+                      content: '\n\n'
+                    },
+                    finish_reason: null
+                  }]
+                };
+                
+                res.write(`data: ${JSON.stringify(separatorEvent)}\n\n`);
+                
+                try {
+                  // Start a new stream with the updated messages
+                  const newLlmStream = await configuredLLM.stream(updatedLangchainMessages);
+                  
+                  // Reset tracking variables
+                  speakerOutput = '';
+                  isInterrupted = false;
+                  if (isJsonStreaming) {
+                    jsonCollectedContent = '';
+                  }
+                  
+                  // Process each chunk from the new stream
+                  for await (const chunk of newLlmStream) {
+                    // Accumulate the speaker's output
+                    if (chunk.content) {
+                      speakerOutput += chunk.content;
+                      
+                      // For JSON mode, collect all content
+                      if (isJsonStreaming) {
+                        jsonCollectedContent += chunk.content;
+                      }
+                    }
+                    
+                    // Format the chunk as an OpenAI-compatible event
+                    const chunkEvent = {
+                      id: responseId,
+                      object: 'chat.completion.chunk',
+                      created: startTime,
+                      model: MODEL,
+                      choices: [{
+                        index: 0,
+                        delta: {},
+                        finish_reason: null
+                      }]
+                    };
+                    
+                    // Add content if present and not in JSON mode
+                    if (chunk.content && !isJsonStreaming) {
+                      chunkEvent.choices[0].delta.content = chunk.content;
+                    }
+                    
+                    // Add tool call chunks if present
+                    if (chunk.tool_call_chunks && chunk.tool_call_chunks.length > 0) {
+                      chunkEvent.choices[0].delta.tool_calls = chunk.tool_call_chunks.map(toolCall => ({
+                        index: toolCall.index,
+                        id: toolCall.id,
+                        type: 'function',
+                        function: {
+                          name: toolCall.name,
+                          arguments: toolCall.args
+                        }
+                      }));
+                    }
+                    
+                    // Send the chunk to the client
+                    res.write(`data: ${JSON.stringify(chunkEvent)}\n\n`);
+                  }
+                } catch (error) {
+                  console.error('Error in restarted stream:', error);
+                  
+                  // Send an error event
+                  const errorEvent = {
+                    id: `error-${Date.now()}`,
+                    object: 'chat.completion.chunk',
+                    created: Math.floor(Date.now() / 1000),
+                    model: MODEL,
+                    choices: [{
+                      index: 0,
+                      delta: {
+                        content: `\n\nError in restarted response: ${error.message}`
+                      },
+                      finish_reason: null
+                    }]
+                  };
+                  
+                  res.write(`data: ${JSON.stringify(errorEvent)}\n\n`);
+                }
+                
+                // Break out of the original streaming loop
                 break;
               }
             }

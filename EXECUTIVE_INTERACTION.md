@@ -29,6 +29,18 @@ The Executive monitors the Speaker's output and can intervene in two ways:
 
 ## Implementation Details
 
+### Restart Behavior
+
+When the Executive decides to restart:
+
+1. The Speaker stops its current generation
+2. A message is sent to the client indicating the restart: `[Executive restarting with updated information]`
+3. The knowledge document from the Executive is added as a system message before the user's query
+4. A completely new response is generated using this updated context
+5. The new response is sent to the client
+
+This behavior is consistent in both streaming and non-streaming modes, ensuring that the Speaker always starts from scratch with the correct information when a restart is needed.
+
 ### Speaker Service
 
 The Speaker service:
