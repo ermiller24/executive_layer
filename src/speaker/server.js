@@ -108,6 +108,13 @@ app.use((req, res, next) => {
   next();
 });
 
+// Add a route handler for /chat/completions (without v1 prefix) for compatibility
+app.post('/chat/completions', async (req, res) => {
+  // Forward the request to the /v1/chat/completions handler
+  req.url = '/v1/chat/completions';
+  app._router.handle(req, res);
+});
+
 // OpenAI-compatible chat completions endpoint
 app.post('/v1/chat/completions', async (req, res) => {
   try {
@@ -140,7 +147,14 @@ app.post('/v1/chat/completions', async (req, res) => {
     }
 
     // Get the user's message
-    const userMessage = messages[messages.length - 1].content;
+    const userMessageContent = messages[messages.length - 1].content;
+    // Convert content to string for logging and vector store
+    const userMessage = typeof userMessageContent === 'string'
+      ? userMessageContent
+      : Array.isArray(userMessageContent)
+        ? JSON.stringify(userMessageContent)
+        : String(userMessageContent || '');
+    
     // Query the vector store for relevant context
     let vectorStoreContext = null;
     try {
@@ -196,7 +210,14 @@ app.post('/v1/chat/completions', async (req, res) => {
     // Start the executive process in parallel
     const executiveRequest = {
       original_query: userMessage,
-      messages: messages,
+      messages: messages.map(msg => ({
+        ...msg,
+        content: typeof msg.content === 'string'
+          ? msg.content
+          : Array.isArray(msg.content)
+            ? JSON.stringify(msg.content)
+            : String(msg.content || '')
+      })),
       // Initially no speaker output, will be updated during streaming
       speaker_output: ''
     };
@@ -232,6 +253,13 @@ app.post('/v1/chat/completions', async (req, res) => {
       }
     });
   }
+});
+
+// Add a route handler for /embeddings (without v1 prefix) for compatibility
+app.post('/embeddings', async (req, res) => {
+  // Forward the request to the /v1/embeddings handler
+  req.url = '/v1/embeddings';
+  app._router.handle(req, res);
 });
 
 // OpenAI-compatible embeddings endpoint
@@ -338,14 +366,35 @@ async function handleChatRequest(messages, options, req, res) {
     // Convert messages to LangChain format using proper message classes
     const langchainMessages = [];
     for (const msg of messages) {
+      // Ensure content is properly formatted for LangChain
+      let content = msg.content;
+      
+      // If content is null or undefined, set it to empty string
+      if (content === null || content === undefined) {
+        content = '';
+      }
+      
+      // If content is an array (multimodal content), convert to string for now
+      // This is a simplification - ideally we would handle multimodal content properly
+      if (Array.isArray(content)) {
+        // Extract text parts from the content array
+        const textParts = content
+          .filter(part => part.type === 'text')
+          .map(part => part.text)
+          .join('\n');
+        
+        content = textParts || JSON.stringify(content);
+      }
+      
+      // Create appropriate message type
       if (msg.role === 'user') {
-        langchainMessages.push(new HumanMessage(msg.content));
+        langchainMessages.push(new HumanMessage(content));
       } else if (msg.role === 'assistant') {
-        langchainMessages.push(new AIMessage(msg.content));
+        langchainMessages.push(new AIMessage(content));
       } else if (msg.role === 'system') {
-        langchainMessages.push(new SystemMessage(msg.content));
+        langchainMessages.push(new SystemMessage(content));
       } else {
-        langchainMessages.push(new HumanMessage(msg.content));
+        langchainMessages.push(new HumanMessage(content));
       }
     }
 
@@ -379,7 +428,14 @@ async function handleChatRequest(messages, options, req, res) {
       // If debug mode is enabled, echo back the user's query and messages
       if (DEBUG) {
         // Echo the user's query
-        const userQuery = messages[messages.length - 1].content;
+        const userMessageContent = messages[messages.length - 1].content;
+        // Format the content for display
+        const userQuery = typeof userMessageContent === 'string'
+          ? userMessageContent
+          : Array.isArray(userMessageContent)
+            ? JSON.stringify(userMessageContent)
+            : String(userMessageContent || '');
+            
         const debugQueryEvent = {
           id: `debug-${Date.now()}`,
           object: 'chat.completion.chunk',
@@ -461,8 +517,17 @@ async function handleChatRequest(messages, options, req, res) {
             // This ensures the executive has the most up-to-date information
             if (speakerOutput.length > 0 && speakerOutput.length % 100 === 0) {
               executivePromise = axios.post(`${EXECUTIVE_URL}/evaluate`, {
-                original_query: messages[messages.length - 1].content,
-                messages: messages,
+                original_query: typeof messages[messages.length - 1].content === 'string'
+                  ? messages[messages.length - 1].content
+                  : JSON.stringify(messages[messages.length - 1].content),
+                messages: messages.map(msg => ({
+                  ...msg,
+                  content: typeof msg.content === 'string'
+                    ? msg.content
+                    : Array.isArray(msg.content)
+                      ? JSON.stringify(msg.content)
+                      : String(msg.content || '')
+                })),
                 speaker_output: speakerOutput
               }).catch(error => {
                 console.warn('Executive evaluation error:', error.message);
@@ -477,6 +542,36 @@ async function handleChatRequest(messages, options, req, res) {
             
             if (executiveResult) {
               const { action, knowledge_document, reason } = executiveResult.data;
+              
+              // Store the knowledge document in the vector store if it's not empty
+              if (knowledge_document && knowledge_document.trim() !== 'No additional information' &&
+                  knowledge_document.trim() !== '' && chromaCollection) {
+                try {
+                  const id = `knowledge-${Date.now()}`;
+                  const timestamp = new Date().toISOString();
+                  const originalQuery = typeof messages[messages.length - 1].content === 'string'
+                    ? messages[messages.length - 1].content
+                    : JSON.stringify(messages[messages.length - 1].content);
+                  
+                  console.log(`[VECTOR_STORE] Storing knowledge document in ChromaDB with ID: ${id}`);
+                  console.log(`[VECTOR_STORE] Knowledge document length: ${knowledge_document.length} characters`);
+                  
+                  // Store in ChromaDB using the built-in embedding function
+                  await chromaCollection.add({
+                    ids: [id],
+                    documents: [knowledge_document],
+                    metadatas: [{
+                      query: originalQuery,
+                      timestamp: timestamp,
+                      source: 'executive-knowledge'
+                    }]
+                  });
+                  
+                  console.log(`[VECTOR_STORE] Successfully stored knowledge document in ChromaDB at ${timestamp}`);
+                } catch (error) {
+                  console.warn('[VECTOR_STORE] Error storing knowledge document in vector store:', error.message);
+                }
+              }
               
               if (action === 'interrupt') {
                 isInterrupted = true;
@@ -542,14 +637,34 @@ async function handleChatRequest(messages, options, req, res) {
                 // Convert to LangChain format
                 const updatedLangchainMessages = [];
                 for (const msg of updatedMessages) {
+                  // Ensure content is properly formatted for LangChain
+                  let content = msg.content;
+                  
+                  // If content is null or undefined, set it to empty string
+                  if (content === null || content === undefined) {
+                    content = '';
+                  }
+                  
+                  // If content is an array (multimodal content), convert to string for now
+                  if (Array.isArray(content)) {
+                    // Extract text parts from the content array
+                    const textParts = content
+                      .filter(part => part.type === 'text')
+                      .map(part => part.text)
+                      .join('\n');
+                    
+                    content = textParts || JSON.stringify(content);
+                  }
+                  
+                  // Create appropriate message type
                   if (msg.role === 'user') {
-                    updatedLangchainMessages.push(new HumanMessage(msg.content));
+                    updatedLangchainMessages.push(new HumanMessage(content));
                   } else if (msg.role === 'assistant') {
-                    updatedLangchainMessages.push(new AIMessage(msg.content));
+                    updatedLangchainMessages.push(new AIMessage(content));
                   } else if (msg.role === 'system') {
-                    updatedLangchainMessages.push(new SystemMessage(msg.content));
+                    updatedLangchainMessages.push(new SystemMessage(content));
                   } else {
-                    updatedLangchainMessages.push(new HumanMessage(msg.content));
+                    updatedLangchainMessages.push(new HumanMessage(content));
                   }
                 }
                 
@@ -667,6 +782,36 @@ async function handleChatRequest(messages, options, req, res) {
             const executiveResponse = await executivePromise;
             const { action, knowledge_document } = executiveResponse.data;
             
+            // Store the knowledge document in the vector store if it's not empty
+            if (knowledge_document && knowledge_document.trim() !== 'No additional information' &&
+                knowledge_document.trim() !== '' && chromaCollection) {
+              try {
+                const id = `knowledge-${Date.now()}`;
+                const timestamp = new Date().toISOString();
+                const originalQuery = typeof messages[messages.length - 1].content === 'string'
+                  ? messages[messages.length - 1].content
+                  : JSON.stringify(messages[messages.length - 1].content);
+                
+                console.log(`[VECTOR_STORE] Storing knowledge document in ChromaDB with ID: ${id}`);
+                console.log(`[VECTOR_STORE] Knowledge document length: ${knowledge_document.length} characters`);
+                
+                // Store in ChromaDB using the built-in embedding function
+                await chromaCollection.add({
+                  ids: [id],
+                  documents: [knowledge_document],
+                  metadatas: [{
+                    query: originalQuery,
+                    timestamp: timestamp,
+                    source: 'executive-knowledge'
+                  }]
+                });
+                
+                console.log(`[VECTOR_STORE] Successfully stored knowledge document in ChromaDB at ${timestamp}`);
+              } catch (error) {
+                console.warn('[VECTOR_STORE] Error storing knowledge document in vector store:', error.message);
+              }
+            }
+            
             if (action === 'interrupt') {
               // Send the interruption to the client
               const interruptionContent = DEBUG
@@ -773,7 +918,9 @@ async function handleChatRequest(messages, options, req, res) {
               ids: [id],
               documents: [speakerOutput],
               metadatas: [{
-                query: messages[messages.length - 1].content,
+                query: typeof messages[messages.length - 1].content === 'string'
+                  ? messages[messages.length - 1].content
+                  : JSON.stringify(messages[messages.length - 1].content),
                 timestamp: timestamp,
                 source: 'speaker-stream'
               }]
@@ -824,8 +971,17 @@ async function handleChatRequest(messages, options, req, res) {
         
         // Update the executive with the speaker's output and get a final evaluation
         const executiveResponse = await axios.post(`${EXECUTIVE_URL}/evaluate`, {
-          original_query: messages[messages.length - 1].content,
-          messages: messages,
+          original_query: typeof messages[messages.length - 1].content === 'string'
+            ? messages[messages.length - 1].content
+            : JSON.stringify(messages[messages.length - 1].content),
+          messages: messages.map(msg => ({
+            ...msg,
+            content: typeof msg.content === 'string'
+              ? msg.content
+              : Array.isArray(msg.content)
+                ? JSON.stringify(msg.content)
+                : String(msg.content || '')
+          })),
           speaker_output: content
         }).catch(error => {
           console.warn('Executive evaluation error:', error.message);
@@ -855,7 +1011,14 @@ async function handleChatRequest(messages, options, req, res) {
         
         // If debug mode is enabled, prepend the user's query
         if (DEBUG) {
-          const userQuery = messages[messages.length - 1].content;
+          const userMessageContent = messages[messages.length - 1].content;
+          // Format the content for display
+          const userQuery = typeof userMessageContent === 'string'
+            ? userMessageContent
+            : Array.isArray(userMessageContent)
+              ? JSON.stringify(userMessageContent)
+              : String(userMessageContent || '');
+              
           // In JSON mode, we need to maintain valid JSON
           if (isJsonMode) {
             const debugObj = { debug: { query: userQuery }, result: JSON.parse(content) };
@@ -906,6 +1069,36 @@ async function handleChatRequest(messages, options, req, res) {
         if (executiveResponse) {
           const { action, knowledge_document } = executiveResponse.data;
           
+          // Store the knowledge document in the vector store if it's not empty
+          if (knowledge_document && knowledge_document.trim() !== 'No additional information' &&
+              knowledge_document.trim() !== '' && chromaCollection) {
+            try {
+              const id = `knowledge-${Date.now()}`;
+              const timestamp = new Date().toISOString();
+              const originalQuery = typeof messages[messages.length - 1].content === 'string'
+                ? messages[messages.length - 1].content
+                : JSON.stringify(messages[messages.length - 1].content);
+              
+              console.log(`[VECTOR_STORE] Storing knowledge document in ChromaDB with ID: ${id}`);
+              console.log(`[VECTOR_STORE] Knowledge document length: ${knowledge_document.length} characters`);
+              
+              // Store in ChromaDB using the built-in embedding function
+              await chromaCollection.add({
+                ids: [id],
+                documents: [knowledge_document],
+                metadatas: [{
+                  query: originalQuery,
+                  timestamp: timestamp,
+                  source: 'executive-knowledge'
+                }]
+              });
+              
+              console.log(`[VECTOR_STORE] Successfully stored knowledge document in ChromaDB at ${timestamp}`);
+            } catch (error) {
+              console.warn('[VECTOR_STORE] Error storing knowledge document in vector store:', error.message);
+            }
+          }
+          
           if (action === 'interrupt') {
             // Add the interruption to the response
             const interruptionContent = DEBUG
@@ -926,14 +1119,34 @@ async function handleChatRequest(messages, options, req, res) {
             // Convert to LangChain format
             const updatedLangchainMessages = [];
             for (const msg of updatedMessages) {
+              // Ensure content is properly formatted for LangChain
+              let content = msg.content;
+              
+              // If content is null or undefined, set it to empty string
+              if (content === null || content === undefined) {
+                content = '';
+              }
+              
+              // If content is an array (multimodal content), convert to string for now
+              if (Array.isArray(content)) {
+                // Extract text parts from the content array
+                const textParts = content
+                  .filter(part => part.type === 'text')
+                  .map(part => part.text)
+                  .join('\n');
+                
+                content = textParts || JSON.stringify(content);
+              }
+              
+              // Create appropriate message type
               if (msg.role === 'user') {
-                updatedLangchainMessages.push(new HumanMessage(msg.content));
+                updatedLangchainMessages.push(new HumanMessage(content));
               } else if (msg.role === 'assistant') {
-                updatedLangchainMessages.push(new AIMessage(msg.content));
+                updatedLangchainMessages.push(new AIMessage(content));
               } else if (msg.role === 'system') {
-                updatedLangchainMessages.push(new SystemMessage(msg.content));
+                updatedLangchainMessages.push(new SystemMessage(content));
               } else {
-                updatedLangchainMessages.push(new HumanMessage(msg.content));
+                updatedLangchainMessages.push(new HumanMessage(content));
               }
             }
             
@@ -985,7 +1198,9 @@ async function handleChatRequest(messages, options, req, res) {
               ids: [id],
               documents: [contentToStore],
               metadatas: [{
-                query: messages[messages.length - 1].content,
+                query: typeof messages[messages.length - 1].content === 'string'
+                  ? messages[messages.length - 1].content
+                  : JSON.stringify(messages[messages.length - 1].content),
                 timestamp: timestamp,
                 source: 'speaker-nonstream'
               }]
