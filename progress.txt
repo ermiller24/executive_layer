@@ -1,4 +1,4 @@
-# Executive Interrupting Rectifier (EIR) - Progress Log
+# Executive Layer (ExL) - Progress Log
 
 ## 2025-03-05
 - Analyzed design document and understood project requirements
@@ -39,7 +39,7 @@
   - make install - Install Node.js dependencies
   - make dev - Start services in development mode
 - Implemented Python chatbot for easy testing and demonstration:
-  - Uses Langchain to connect to the EIR system
+  - Uses Langchain to connect to the ExL system
   - Supports both langchain-openai and openlm integrations
   - Provides a simple command-line interface
   - Streams responses in real-time

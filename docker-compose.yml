@@ -7,7 +7,7 @@ services:
       dockerfile: Dockerfile.speaker
       args:
         - DEBUG=${DEBUG:-false}
-    image: eir-speaker
+    image: exlayer-speaker
     ports:
       - "3000:3000"  # Expose the OpenAI-compatible API
     environment:
@@ -21,7 +21,7 @@ services:
       - DEFAULT_API_KEY=${DEFAULT_API_KEY}
       - DEBUG=${DEBUG:-false}
     networks:
-      - eir_net
+      - exlayernet
     depends_on:
       - executive
       - chroma
@@ -30,7 +30,7 @@ services:
     build:
       context: .
       dockerfile: Dockerfile.executive
-    image: eir-executive
+    image: exlayer-executive
     ports:
       - "8001:8001"  # Expose the Executive API
     environment:
@@ -42,7 +42,7 @@ services:
       - NEO4J_USER=${NEO4J_USER}
       - NEO4J_PASSWORD=${NEO4J_PASSWORD}
     networks:
-      - eir_net
+      - exlayernet
     depends_on:
       neo4j:
         condition: service_healthy
@@ -54,7 +54,7 @@ services:
     ports:
       - "8000:8000"  # Chroma API
     networks:
-      - eir_net
+      - exlayernet
 
   neo4j:
     image: neo4j:2025.02.0
@@ -66,7 +66,7 @@ services:
     volumes:
       - neo4j_data:/data
     networks:
-      - eir_net
+      - exlayernet
     healthcheck:
       test: ["CMD-SHELL", "wget --no-verbose --tries=1 --spider http://localhost:7474 || exit 1"]
       interval: 5s
@@ -75,7 +75,7 @@ services:
       start_period: 30s
 
 networks:
-  eir_net:
+  exlayernet:
     driver: bridge
 
 volumes:

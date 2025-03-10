@@ -1,10 +1,10 @@
 # Speaker-Executive Interaction Guide
 
-This document explains how the Speaker and Executive components interact in the Executive Interrupting Rectifier (EIR) system and how to test this interaction.
+This document explains how the Speaker and Executive components interact in the Executive Layer (ExL) system and how to test this interaction.
 
 ## Overview
 
-The EIR system consists of two main LLM components:
+The ExL system consists of two main LLM components:
 
 1. **Speaker**: The front-facing model that directly interacts with users
 2. **Executive**: The supporting model that provides knowledge and course correction
@@ -73,7 +73,7 @@ Key components:
 
 ### Prerequisites
 
-- The EIR system must be deployed and running
+- The ExL system must be deployed and running
 - Debug mode should be enabled for comprehensive testing
 
 ### Running the Tests
@@ -120,7 +120,7 @@ You can also test the interaction manually:
    curl -X POST http://localhost:3000/v1/chat/completions \
      -H "Content-Type: application/json" \
      -d '{
-       "model": "eir-default",
+       "model": "exlayer-default",
        "messages": [
          {"role": "system", "content": "You are a helpful assistant."},
          {"role": "user", "content": "What is the capital of France? Is it Lyon?"}

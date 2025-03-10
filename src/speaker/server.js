@@ -266,7 +266,7 @@ app.post('/embeddings', async (req, res) => {
 app.post('/v1/embeddings', async (req, res) => {
   try {
     // Extract request parameters
-    const { model = 'eir-embedding', input, user } = req.body;
+    const { model = 'exlayer-embedding', input, user } = req.body;
     
     if (!input) {
       return res.status(400).json({
