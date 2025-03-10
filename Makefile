@@ -1,4 +1,4 @@
-# Makefile for Executive Interrupting Rectifier (EIR)
+# Makefile for Executive Layer (ExL)
 
 # Default shell
 SHELL := /bin/bash
@@ -14,7 +14,7 @@ PIP := $(VENV)/bin/pip
 # Default target
 .PHONY: help
 help:
-	@echo "Executive Interrupting Rectifier (EIR) Makefile"
+	@echo "Executive Layer (ExL) Makefile"
 	@echo ""
 	@echo "Usage:"
 	@echo "  make deploy        - Build and start all services"

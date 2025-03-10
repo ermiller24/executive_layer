@@ -1,10 +1,10 @@
-# Executive Interrupting Rectifier (EIR)
+# Executive Layer (ExL)
 
-The Executive Interrupting Rectifier (EIR) is an operability layer that lives on top of an arbitrary LLM. It provides executive thinking, course correction, contextual knowledge, and advanced planning and reasoning capabilities, while acting as a drop-in replacement for any LLM model by implementing an OpenAI-compatible API.
+The Executive Layer (ExL) is an operability layer that lives on top of an arbitrary LLM. It provides executive thinking, course correction, contextual knowledge, and advanced planning and reasoning capabilities, while acting as a drop-in replacement for any LLM model by implementing an OpenAI-compatible API.
 
 ## Architecture
 
-EIR operates by running two LLM instances simultaneously:
+ExL operates by running two LLM instances simultaneously:
 
 1. **Speaker Layer**: The forward-facing model that the user interacts with, providing chat, tool calls, etc.
 2. **Executive Layer**: Provides support for the speaker, monitoring its output and providing corrections or additional information as needed.
@@ -28,16 +28,16 @@ Additional components:
 
 ## Components
 
-- **API Bridge**: Provides an OpenAI-compatible API for applications to interact with EIR.
+- **API Bridge**: Provides an OpenAI-compatible API for applications to interact with ExL.
 - **Speaker Service**: Handles generating responses to user queries.
 - **Executive Service**: Monitors the Speaker, provides corrections, and manages the Knowledge Graph.
 - **Vector Store Service**: Stores and retrieves embeddings for quick context retrieval.
 - **Neo4j**: Stores the Knowledge Graph.
-- **Python Chatbot**: A simple command-line interface for interacting with the EIR system.
+- **Python Chatbot**: A simple command-line interface for interacting with the ExL system.
 
 ## Supported OpenAI API Features
 
-EIR implements all critical OpenAI API features:
+ExL implements all critical OpenAI API features:
 
 - **Chat Completions**: Generate responses to conversations.
 - **Embeddings**: Generate vector embeddings for text.
@@ -83,8 +83,8 @@ NEO4J_USER=neo4j
 NEO4J_PASSWORD=password
 
 # Python Chatbot Configuration
-EIR_API_URL=http://localhost:3000
-EIR_API_KEY=dummy-api-key
+ExL_API_URL=http://localhost:3000
+ExL_API_KEY=dummy-api-key
 ```
 
 ### Quick Start with Make
@@ -133,7 +133,7 @@ The API will be available at `http://localhost:3000`
 
 ### Python Chatbot
 
-The project includes a Python chatbot that provides a simple command-line interface for interacting with the EIR system. The chatbot uses Langchain to connect to the EIR system via its OpenAI-compatible API.
+The project includes a Python chatbot that provides a simple command-line interface for interacting with the ExL system. The chatbot uses Langchain to connect to the ExL system via its OpenAI-compatible API.
 
 To run the chatbot:
 
@@ -149,7 +149,7 @@ python chatbot.py
 ```
 
 The chatbot supports the following commands:
-- Type your query to get a response from the EIR system
+- Type your query to get a response from the ExL system
 - Type 'exit' or 'quit' to exit the chatbot
 - Type 'clear' to start a new conversation
 
@@ -175,7 +175,7 @@ The test script verifies all critical OpenAI API features:
 
 ## API Usage
 
-EIR implements the OpenAI API, so you can use it as a drop-in replacement for OpenAI's API:
+ExL implements the OpenAI API, so you can use it as a drop-in replacement for OpenAI's API:
 
 ### Basic Chat Completion
 
@@ -324,7 +324,7 @@ executive_layer/
 ├── package.json            # Node.js dependencies
 ├── requirements.txt        # Python dependencies for the chatbot
 ├── .env                    # Environment variables
-├── chatbot.py              # Python chatbot for interacting with EIR
+├── chatbot.py              # Python chatbot for interacting with ExL
 ├── src/
 │   ├── api/                # OpenAI-compatible API bridge
 │   │   ├── server.js       # API server

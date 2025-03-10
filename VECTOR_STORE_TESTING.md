@@ -1,10 +1,10 @@
 # Vector Store Integration Testing Guide
 
-This document outlines how to verify that the vector database (ChromaDB) is properly integrated with the speaker component of the Executive Interrupting Rectifier (EIR) system.
+This document outlines how to verify that the vector database (ChromaDB) is properly integrated with the speaker component of the Executive Layer (ExL) system.
 
 ## Overview
 
-The EIR system uses ChromaDB as its vector database to:
+The ExL system uses ChromaDB as its vector database to:
 
 1. Store responses from the speaker LLM
 2. Retrieve relevant context when similar queries are encountered
@@ -12,7 +12,7 @@ The EIR system uses ChromaDB as its vector database to:
 
 ## Prerequisites
 
-- The EIR system must be deployed and running
+- The ExL system must be deployed and running
 - All services (speaker, executive, chroma, neo4j) must be operational
 
 ## Testing Process
