@@ -462,6 +462,7 @@ async function handleChatRequest(messages, options, req, res) {
         // Variables to track the speaker's output
         let speakerOutput = '';
         let isInterrupted = false;
+        let hasExecutiveInterrupted = false; // Flag to track if executive has already interrupted
         
         // For JSON mode, we need to collect all chunks and parse at the end
         const isJsonStreaming = isJsonMode && stream;
@@ -515,7 +516,8 @@ async function handleChatRequest(messages, options, req, res) {
           }
           
           // Check if the executive has completed and wants to interrupt
-          if (executivePromise && !isInterrupted) {
+          // Only check if we haven't already been interrupted by the executive
+          if (executivePromise && !isInterrupted && !hasExecutiveInterrupted) {
             // Update the executivePromise with the current speaker output
             // This ensures the executive has the most up-to-date information
             if (speakerOutput.length > 0 && speakerOutput.length % 100 === 0) {
@@ -598,6 +600,7 @@ async function handleChatRequest(messages, options, req, res) {
               
               if (action === 'interrupt') {
                 isInterrupted = true;
+                hasExecutiveInterrupted = true; // Mark that the executive has interrupted
                 
                 // Send the interruption to the client
                 const interruptionContent = DEBUG
@@ -626,6 +629,7 @@ async function handleChatRequest(messages, options, req, res) {
                 // For restart, we'll stop the current stream and start a new one
                 // with the knowledge document included
                 isInterrupted = true;
+                hasExecutiveInterrupted = true; // Mark that the executive has interrupted
                 
                 // Send a message indicating the restart
                 const restartContent = DEBUG
@@ -799,8 +803,8 @@ async function handleChatRequest(messages, options, req, res) {
           }
         }
         
-        // Check one final time if the executive wants to interrupt
-        if (executivePromise) {
+        // Check one final time if the executive wants to interrupt, but only if it hasn't already interrupted
+        if (executivePromise && !hasExecutiveInterrupted) {
           try {
             const executiveResponse = await executivePromise;
             const { action, knowledge_document, reason } = executiveResponse.data;
@@ -856,6 +860,9 @@ async function handleChatRequest(messages, options, req, res) {
             }
             
             if (action === 'interrupt') {
+              // Mark that the executive has interrupted
+              hasExecutiveInterrupted = true;
+              
               // Send the interruption to the client
               const interruptionContent = DEBUG
                 ? `\n\n[DEBUG] Executive Interruption:\n${JSON.stringify(executiveResponse.data)}\n\n[Executive Interruption: ${knowledge_document}]`
