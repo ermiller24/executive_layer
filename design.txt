@@ -35,16 +35,4 @@ Then we implement the vector store. In theory the vector store should almost be 
 
 # EXTENSIONS
 
-One possible extension is to add a managed docker instance to the system to act as a sandbox. The executive could use this to build longer documents, execute computations, or do project planning or file storage. The executive could, for example, see that the speaker is trying to write python code using a certain method of an object and decide to use its sandbox to check that the object actually has that method, adding that information into its knowledge graph and passing it back to the speaker as necessary. It may instead be better to leave the docker sandbox out and package it as an MCP tool for the client, like we currently have in work/chatbot. That sort of depends on how effective the executive is at its other tasks and if it has extra bandwidth. Do not implement this until we have come to a decision on this design choice.
-
-Another possible extension is to let the executive handle prompt extension. When the context window of the speaker starts to get long, the executive can prepare a summary of what has happened so far and then reset the speaker. This way the speaker's context window is automatically managed and it can go far beyond the standard conversation length.
-
-A third extension is to allow different models for the speaker and the executive. Of particular interest is a chat model for the speaker and a thinking model for the executive. That would result in the user getting the more personable chat model responses but still getting the benefits of the thinking models.
-
-Another extension that might be of interest is tagging the executive's responses as thought and passing them in their entirety back to the user. That lets the user see everything that is going on, but would muddy the response a bit.
-
-We also could implement a queue system for the executive's llm calls. That would allow us to have multiple different models running as executives simultaneously, each with a different focus, while the speaker continues. This could prove to be overwhelming or confusing and should not be included until we can test it.
-
-There is also a possibility of externally hosting both the knowledge graph and the vector store. This would allow multiple instances to be running while all sharing the same knowledge base and learning in real time. As the size of the system grows we have to worry that too many systems might make the knowledge graph too muddy, and so we implement separate knowledge graph managers from the executive layers. This is more of an enterprise-grade problem, so we don't need to do this unless we get good traction.
-
-Another idea is advanced planning capabilities by having the executive keep track of both a design and a progress document, like we have in this repo, when the prompt would necessitate it. In theory the speaker could have its prompts reset by the executive and the executive prompt could reset using the design and progress document, allowing infinite output context.
+Externally hosting both the knowledge graph and the vector store. This would allow multiple instances to be running while all sharing the same knowledge base and learning in real time. As the size of the system grows we have to worry that too many systems might make the knowledge graph too muddy, and so we implement separate knowledge graph managers from the executive layers. This is more of an enterprise-grade problem, so we don't need to do this unless we get good traction.

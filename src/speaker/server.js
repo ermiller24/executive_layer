@@ -131,7 +131,8 @@ app.post('/v1/chat/completions', async (req, res) => {
       user,
       tools,
       tool_choice,
-      response_format
+      response_format,
+      include_executive_thinking = false // New parameter to include executive reasoning
     } = req.body;
 
     // Validate required parameters
@@ -240,6 +241,7 @@ app.post('/v1/chat/completions', async (req, res) => {
       tools,
       tool_choice,
       response_format,
+      include_executive_thinking, // Pass the new parameter
       executivePromise
     }, req, res);
   } catch (error) {
@@ -328,6 +330,7 @@ async function handleChatRequest(messages, options, req, res) {
       tools,
       tool_choice,
       response_format,
+      include_executive_thinking = false, // Extract the new parameter
       executivePromise: initialExecutivePromise
     } = options;
     
@@ -542,6 +545,26 @@ async function handleChatRequest(messages, options, req, res) {
             
             if (executiveResult) {
               const { action, knowledge_document, reason } = executiveResult.data;
+              
+              // If executive thinking is enabled, send the reasoning as a separate event
+              if (include_executive_thinking && reason) {
+                const thinkingEvent = {
+                  id: `thinking-${Date.now()}`,
+                  object: 'chat.completion.chunk',
+                  created: Math.floor(Date.now() / 1000),
+                  model: MODEL,
+                  choices: [{
+                    index: 0,
+                    delta: {
+                      thinking: reason
+                    },
+                    finish_reason: null
+                  }]
+                };
+                
+                res.write(`data: ${JSON.stringify(thinkingEvent)}\n\n`);
+                console.log(`[EXECUTIVE_THINKING] Sent executive reasoning: "${reason.substring(0, 100)}..."`);
+              }
               
               // Store the knowledge document in the vector store if it's not empty
               if (knowledge_document && knowledge_document.trim() !== 'No additional information' &&
@@ -780,7 +803,27 @@ async function handleChatRequest(messages, options, req, res) {
         if (executivePromise) {
           try {
             const executiveResponse = await executivePromise;
-            const { action, knowledge_document } = executiveResponse.data;
+            const { action, knowledge_document, reason } = executiveResponse.data;
+            
+            // If executive thinking is enabled, send the reasoning as a separate event
+            if (include_executive_thinking && reason) {
+              const thinkingEvent = {
+                id: `thinking-${Date.now()}`,
+                object: 'chat.completion.chunk',
+                created: Math.floor(Date.now() / 1000),
+                model: MODEL,
+                choices: [{
+                  index: 0,
+                  delta: {
+                    thinking: reason
+                  },
+                  finish_reason: null
+                }]
+              };
+              
+              res.write(`data: ${JSON.stringify(thinkingEvent)}\n\n`);
+              console.log(`[EXECUTIVE_THINKING] Sent executive reasoning: "${reason.substring(0, 100)}..."`);
+            }
             
             // Store the knowledge document in the vector store if it's not empty
             if (knowledge_document && knowledge_document.trim() !== 'No additional information' &&
@@ -1067,7 +1110,14 @@ async function handleChatRequest(messages, options, req, res) {
         
         // Check if the executive wants to intervene
         if (executiveResponse) {
-          const { action, knowledge_document } = executiveResponse.data;
+          const { action, knowledge_document, reason } = executiveResponse.data;
+          
+          // If executive thinking is enabled, include the reasoning in the response
+          if (include_executive_thinking && reason) {
+            // Add the thinking field to the response
+            formattedResponse.choices[0].message.thinking = reason;
+            console.log(`[EXECUTIVE_THINKING] Included executive reasoning in response: "${reason.substring(0, 100)}..."`);
+          }
           
           // Store the knowledge document in the vector store if it's not empty
           if (knowledge_document && knowledge_document.trim() !== 'No additional information' &&

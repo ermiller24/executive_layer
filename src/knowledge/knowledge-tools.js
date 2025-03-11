@@ -50,11 +50,10 @@ const knowledgeTools = {
   /**
    * Create a node in the knowledge graph
    * @param {Object} args - Tool arguments
-   * @param {string} args.nodeType - The type of node to create (tag_category, tag, topic, knowledge, file)
+   * @param {string} args.nodeType - The type of node to create (tag_category, tag, topic, knowledge)
    * @param {string} args.name - The name of the node (must be unique within its type)
    * @param {string} args.description - A description of the node
    * @param {Array<{type: string, name: string}>} args.belongsTo - Optional array of nodes this node belongs to
-   * @param {string} args.path - Optional path for file nodes
    * @param {Object} args.additionalFields - Optional additional fields for the node
    * @returns {Promise<string>} - Success message with the created node's ID
    */
@@ -178,14 +177,14 @@ const knowledgeTools = {
 const knowledgeToolSchemas = {
   knowledge_create_node: {
     name: "knowledge_create_node",
-    description: "Create a node in the knowledge graph. Node types include: tag_category, tag, topic, knowledge, file. Each node has a name and description, and can optionally belong to other nodes. File nodes require a path, and knowledge nodes should have a summary.",
+    description: "Create a node in the knowledge graph. Node types include: tag_category, tag, topic, knowledge. Each node has a name and description, and can optionally belong to other nodes. Knowledge nodes should have a summary.",
     parameters: {
       type: "object",
       properties: {
         nodeType: {
           type: "string",
-          description: "The type of node to create (tag_category, tag, topic, knowledge, file)",
-          enum: ["tag_category", "tag", "topic", "knowledge", "file"]
+          description: "The type of node to create (tag_category, tag, topic, knowledge)",
+          enum: ["tag_category", "tag", "topic", "knowledge"]
         },
         name: {
           type: "string",
@@ -212,10 +211,6 @@ const knowledgeToolSchemas = {
             required: ["type", "name"]
           },
           description: "Optional array of nodes this node belongs to"
-        },
-        path: {
-          type: "string",
-          description: "Optional path for file nodes"
         },
         additionalFields: {
           type: "object",
