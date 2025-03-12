@@ -104,6 +104,48 @@ Respond to the user's query using these tools as needed.`;
 // and didn't provide significant value to the system.
 // The executive now only receives updates through the main /evaluate endpoint.
 
+// Response plan endpoint for extended mode
+app.post('/generate_response_plan', async (req, res) => {
+  try {
+    console.log('[EXECUTIVE] Received request to generate response plan');
+    const { query, messages } = req.body;
+
+    console.log(`[EXECUTIVE] Query: ${query.substring(0, 50)}...`);
+    console.log(`[EXECUTIVE] Messages count: ${messages ? messages.length : 0}`);
+
+    if (!query || !messages || !Array.isArray(messages)) {
+      console.error('[EXECUTIVE] Invalid request parameters for response plan generation');
+      return res.status(400).json({
+        error: {
+          message: 'Invalid request parameters',
+          type: 'invalid_request_error',
+          param: null,
+          code: 'invalid_request'
+        }
+      });
+    }
+
+    // Generate a response plan
+    console.log('[EXECUTIVE] Generating response plan...');
+    const responsePlan = await generateResponsePlan(query, messages);
+    console.log(`[EXECUTIVE] Response plan generated (${responsePlan.length} chars)`);
+
+    // Return the response plan
+    res.json({ response_plan: responsePlan });
+    console.log('[EXECUTIVE] Response plan sent successfully');
+  } catch (error) {
+    console.error('[EXECUTIVE] Error generating response plan:', error);
+    res.status(500).json({
+      error: {
+        message: 'An error occurred during response plan generation',
+        type: 'server_error',
+        param: null,
+        code: 'internal_server_error'
+      }
+    });
+  }
+});
+
 // Evaluation endpoint
 app.post('/evaluate', async (req, res) => {
   try {
@@ -373,6 +415,108 @@ Respond with a JSON object with the following structure:
       reason: 'Error during evaluation',
       knowledge_document: knowledgeDocument ? knowledgeDocument.content : 'No additional information'
     };
+  }
+}
+
+/**
+ * Generate a response plan for a query
+ * @param {string} query - The user's query
+ * @param {Array} messages - The conversation messages
+ * @returns {Promise<string>} - The generated response plan
+ */
+async function generateResponsePlan(query, messages) {
+  try {
+    console.log('[EXECUTIVE] generateResponsePlan called');
+    console.log(`[EXECUTIVE] Query: ${query}`);
+    console.log(`[EXECUTIVE] Messages count: ${messages.length}`);
+    
+    // Search the knowledge graph for relevant information
+    let knowledgeDocument;
+    try {
+      console.log('[EXECUTIVE] Searching knowledge graph for response plan');
+      knowledgeDocument = await searchKnowledgeGraph(query);
+      console.log('[EXECUTIVE] Knowledge graph search completed');
+      if (knowledgeDocument) {
+        console.log('[EXECUTIVE] Knowledge document found');
+      } else {
+        console.log('[EXECUTIVE] No knowledge document found');
+      }
+    } catch (error) {
+      console.error('[EXECUTIVE] Error searching knowledge graph for response plan:', error);
+      knowledgeDocument = null;
+    }
+
+    // Prepare the system prompt for the executive
+    console.log('[EXECUTIVE] Preparing system prompt');
+    const systemPrompt = `You are the Executive layer of an AI system. Your job is to create a detailed, structured response plan for the Speaker (the user-facing AI) to follow when responding to the user's query.
+
+This is for Extended Response Mode, where you (the Executive) create a comprehensive plan BEFORE the Speaker begins responding. The Speaker will follow your plan step by step.
+
+The response plan should:
+1. Break down the query into its key components and objectives
+2. Outline the main points that should be covered in the response, in a logical sequence
+3. Provide a clear, step-by-step structure for the response (numbered sections and subsections)
+4. Specify what research or knowledge is needed for each section
+5. Identify any potential challenges or areas where the Speaker might need additional information
+6. Provide guidance on tone, style, and level of detail appropriate for this query
+7. Include specific instructions for complex parts of the response
+8. Suggest examples, analogies, or illustrations where appropriate
+
+Format your response plan as a structured Markdown document with:
+- A title that reflects the user's query
+- Clear section headings and subheadings
+- Numbered steps or bullet points for clarity
+- Specific instructions for the Speaker at each step
+
+This response plan will be used to guide the Speaker's response and will be stored in a progress document for reference during extended conversations. Be thorough and specific, as this plan will help maintain coherence in long conversations.
+
+You have access to the following tools to interact with the knowledge graph:
+- knowledge_create_node: Create a node in the knowledge graph
+- knowledge_create_edge: Create an edge between nodes in the knowledge graph
+- knowledge_alter: Alter or delete a node in the knowledge graph
+- knowledge_search: Search the knowledge graph using Cypher query components
+- knowledge_unsafe_query: Execute an arbitrary Cypher query against the Neo4j knowledge graph
+
+Use these tools to gather information from the knowledge graph if needed.`;
+
+    // Prepare the user message
+    console.log('[EXECUTIVE] Preparing user message');
+    let userMessage = `User Query: ${query}\n\nConversation History:\n`;
+    
+    // Add the conversation history
+    for (const message of messages) {
+      userMessage += `${message.role.toUpperCase()}: ${message.content}\n\n`;
+    }
+    
+    // Add the knowledge document if available
+    if (knowledgeDocument) {
+      userMessage += `\nRelevant Knowledge:\n${knowledgeDocument.content}\n\n`;
+    } else {
+      userMessage += `\nNo relevant knowledge found in the knowledge graph.\n\n`;
+    }
+    
+    userMessage += `Create a detailed, structured response plan for addressing this query. Remember, you are creating a plan for the Speaker to follow, not writing the actual response. Be specific and thorough, as this plan will guide the Speaker's response and help maintain coherence in long conversations.`;
+
+    // Create a runnable sequence
+    console.log('[EXECUTIVE] Creating runnable sequence');
+    const chain = RunnableSequence.from([
+      llm,
+      new StringOutputParser()
+    ]);
+
+    // Invoke the chain
+    console.log('[EXECUTIVE] Invoking LLM chain');
+    const result = await chain.invoke([
+      { type: 'system', content: systemPrompt },
+      { type: 'human', content: userMessage }
+    ]);
+    console.log(`[EXECUTIVE] LLM chain result received (${result.length} chars)`);
+    console.log(`[EXECUTIVE] Result preview: ${result.substring(0, 100)}...`);
+
+    return result;
+  } catch (error) {
+    console.error('[EXECUTIVE] Error generating response plan:', error);
+    return `Error generating response plan: ${error.message}. Proceeding with default response.`;
   }
 }
 

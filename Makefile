@@ -25,6 +25,7 @@ help:
 	@echo "  make test-vector   - Run vector store integration test"
 	@echo "  make test-exec     - Run knowledge graph integration test"
 	@echo "  make test-interaction - Run speaker-executive interaction test"
+	@echo "  make test-extended - Run extended mode test"
 	@echo "  make clean         - Remove containers and volumes"
 	@echo "  make build         - Build all Docker images"
 	@echo "  make status        - Check the status of all services"
@@ -97,7 +98,6 @@ test-exec:
 		npm install; \
 	fi
 	node test_knowledge_graph.js
-
 # Run the executive interaction test
 .PHONY: test-interaction
 test-interaction:
@@ -107,6 +107,16 @@ test-interaction:
 		npm install; \
 	fi
 	node test_executive_interaction.js
+
+# Run the extended mode test
+.PHONY: test-extended
+test-extended:
+	@echo "Running extended mode test..."
+	@if [ ! -d "node_modules" ]; then \
+		echo "Installing dependencies..."; \
+		npm install; \
+	fi
+	node test_extended_mode.js
 
 # Remove containers and volumes
 .PHONY: clean

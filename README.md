@@ -44,6 +44,7 @@ ExL implements all critical OpenAI API features:
 - **Streaming**: Stream responses token by token in real-time.
 - **Tool Calling**: Allow the model to call external tools/functions.
 - **JSON Mode**: Generate structured JSON responses.
+- **Extended Response Mode**: Handle long-running conversations with automatic context management (see [EXTENDED_MODE.md](EXTENDED_MODE.md)).
 
 ## Setup
 
@@ -85,6 +86,15 @@ NEO4J_PASSWORD=password
 # Python Chatbot Configuration
 ExL_API_URL=http://localhost:3000
 ExL_API_KEY=dummy-api-key
+
+# Extended Mode Configuration (optional)
+DATA_DIR=/data/extended
+EXTENDED_MAX_CONTEXT_SIZE=16000
+EXTENDED_SUMMARIZATION_THRESHOLD=0.7
+EXTENDED_PRESERVE_MESSAGE_COUNT=4
+EXTENDED_EXPIRATION_TIME=86400000
+EXTENDED_CLEANUP_INTERVAL=3600000
+EXTENDED_SUMMARY_MODEL=openai:gpt-3.5-turbo
 ```
 
 ### Quick Start with Make
@@ -165,13 +175,28 @@ make test
 node test_api.js
 ```
 
-The test script verifies all critical OpenAI API features:
+The main test script verifies all critical OpenAI API features:
 - Basic chat completions
 - Embeddings
 - Streaming
 - Tool calling
 - Streaming tool calling
 - JSON mode
+
+Additional test scripts are available for specific components:
+```bash
+# Test vector store integration
+make test-vector
+
+# Test knowledge graph integration
+make test-exec
+
+# Test speaker-executive interaction
+make test-interaction
+
+# Test extended response mode
+make test-extended
+```
 
 ## API Usage
 
@@ -309,6 +334,60 @@ const jsonData = JSON.parse(result.choices[0].message.content);
 console.log(jsonData);
 ```
 
+### Extended Response Mode
+
+```javascript
+// Initial request with extended_thread_id
+const initialResponse = await fetch('http://localhost:3000/v1/chat/completions', {
+  method: 'POST',
+  headers: {
+    'Content-Type': 'application/json'
+  },
+  body: JSON.stringify({
+    model: 'eir-default',
+    messages: [
+      { role: 'system', content: 'You are a helpful assistant.' },
+      { role: 'user', content: 'Tell me about quantum computing.' }
+    ],
+    temperature: 0.7,
+    extended_thread_id: 'conversation-123' // Enable extended mode with a thread ID
+  })
+});
+
+const initialResult = await initialResponse.json();
+console.log(initialResult.choices[0].message.content);
+
+// Follow-up request with the same thread ID (only need to send new messages)
+const followUpResponse = await fetch('http://localhost:3000/v1/chat/completions', {
+  method: 'POST',
+  headers: {
+    'Content-Type': 'application/json'
+  },
+  body: JSON.stringify({
+    model: 'eir-default',
+    messages: [
+      { role: 'user', content: 'How does quantum entanglement work?' }
+    ],
+    temperature: 0.7,
+    extended_thread_id: 'conversation-123' // Same thread ID as before
+  })
+});
+
+const followUpResult = await followUpResponse.json();
+console.log(followUpResult.choices[0].message.content);
+
+// Get the progress document for the thread
+const progressResponse = await fetch('http://localhost:3000/v1/extended/progress/conversation-123', {
+  method: 'GET',
+  headers: {
+    'Content-Type': 'application/json'
+  }
+});
+
+const progressResult = await progressResponse.json();
+console.log(progressResult.progress_document);
+```
+
 ## Development
 
 ### Project Structure
@@ -316,27 +395,33 @@ console.log(jsonData);
 ```
 executive_layer/
 ├── docker-compose.yml      # Docker Compose configuration
-├── Dockerfile.api          # Dockerfile for API service
 ├── Dockerfile.speaker      # Dockerfile for Speaker service
 ├── Dockerfile.executive    # Dockerfile for Executive service
-├── Dockerfile.vector_store # Dockerfile for Vector Store service
 ├── Makefile                # Make commands for common operations
 ├── package.json            # Node.js dependencies
 ├── requirements.txt        # Python dependencies for the chatbot
 ├── .env                    # Environment variables
 ├── chatbot.py              # Python chatbot for interacting with ExL
+├── EXTENDED_MODE.md        # Documentation for Extended Response Mode
 ├── src/
-│   ├── api/                # OpenAI-compatible API bridge
-│   │   ├── server.js       # API server
-│   │   ├── chat.js         # Chat completions handler
-│   │   └── embedding.js    # Embeddings handler
-│   ├── speaker/            # Speaker LLM service
+│   ├── speaker/            # Speaker LLM service (front-facing API)
 │   │   └── server.js       # Speaker server
 │   ├── executive/          # Executive LLM service
 │   │   └── server.js       # Executive server
-│   └── vector_store/       # Vector Store service
-│       └── server.js       # Vector Store server
-└── test_api.js             # API test script
+│   ├── extended/           # Extended Response Mode implementation
+│   │   ├── thread-manager.js    # Thread storage and management
+│   │   ├── progress-tracker.js  # Progress document management
+│   │   ├── context-manager.js   # Context window management
+│   │   ├── extended-mode.js     # Main extended mode implementation
+│   │   └── index.js             # Module exports
+│   └── knowledge/          # Knowledge graph implementation
+│       ├── knowledge-tools.js   # Knowledge graph tools
+│       └── neo4j-manager.js     # Neo4j database manager
+├── test_api.js             # API test script
+├── test_vector_store.js    # Vector store integration test
+├── test_knowledge_graph.js # Knowledge graph integration test
+├── test_executive_interaction.js # Executive interaction test
+└── test_extended_mode.js   # Extended mode test
 ```
 
 ### Local Development
@@ -355,10 +440,8 @@ executive_layer/
 
    Or start the services individually:
    ```
-   node src/vector_store/server.js
    node src/executive/server.js
    node src/speaker/server.js
-   node src/api/server.js
    ```
 
 3. Set up the Python environment for the chatbot:
@@ -386,6 +469,10 @@ The project includes a Makefile with the following commands:
 - `make restart` - Restart all services
 - `make logs` - View logs from all services
 - `make test` - Run the test script
+- `make test-vector` - Run vector store integration test
+- `make test-exec` - Run knowledge graph integration test
+- `make test-interaction` - Run speaker-executive interaction test
+- `make test-extended` - Run extended mode test
 - `make clean` - Remove containers and volumes
 - `make build` - Build all Docker images
 - `make status` - Check the status of all services
@@ -393,7 +480,6 @@ The project includes a Makefile with the following commands:
 - `make dev` - Start services in development mode
 - `make setup-python` - Set up Python virtual environment
 - `make chatbot` - Run the Python chatbot
-- `make logs-api` - View logs from the API service
 - `make logs-speaker` - View logs from the Speaker service
 - `make logs-executive` - View logs from the Executive service
 - `make logs-vector-store` - View logs from the Vector Store service
@@ -403,6 +489,6 @@ The project includes a Makefile with the following commands:
 
 Potential extensions (not yet implemented):
 - Managed Docker instance for sandboxed computations
-- Automatic prompt extension for longer conversations
 - Different models for Speaker and Executive
 - Multiple Executive models running simultaneously
+- File processing and vision capabilities

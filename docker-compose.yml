@@ -20,6 +20,17 @@ services:
       - SPEAKER_MODEL_KWARGS=${SPEAKER_MODEL_KWARGS}
       - DEFAULT_API_KEY=${DEFAULT_API_KEY}
       - DEBUG=${DEBUG:-false}
+      # Extended mode configuration
+      - DATA_DIR=${DATA_DIR:-/data/extended}
+      - EXTENDED_MAX_CONTEXT_SIZE=${EXTENDED_MAX_CONTEXT_SIZE:-16000}
+      - EXTENDED_SUMMARIZATION_THRESHOLD=${EXTENDED_SUMMARIZATION_THRESHOLD:-0.7}
+      - EXTENDED_PRESERVE_MESSAGE_COUNT=${EXTENDED_PRESERVE_MESSAGE_COUNT:-4}
+      - EXTENDED_EXPIRATION_TIME=${EXTENDED_EXPIRATION_TIME:-86400000}
+      - EXTENDED_CLEANUP_INTERVAL=${EXTENDED_CLEANUP_INTERVAL:-3600000}
+      - EXTENDED_SUMMARY_MODEL=${EXTENDED_SUMMARY_MODEL:-openai:gpt-3.5-turbo}
+      - EXTENDED_SUMMARY_MODEL_KWARGS=${EXTENDED_SUMMARY_MODEL_KWARGS}
+    volumes:
+      - extended_data:/data/extended
     networks:
       - exlayernet
     depends_on:
@@ -81,3 +92,4 @@ networks:
 volumes:
   neo4j_data:
   chroma_data:
+  extended_data:  # Volume for extended mode data

@@ -331,13 +331,12 @@
    - Implement message appending for incremental updates
    - Add validation for thread IDs and message formats
 
-#### Phase 2: Context Management
-3. Implement dynamic summarization:
-   - Create a function to measure context window utilization
-   - Add a threshold trigger for when summarization should occur
-   - Implement the summarization logic in the executive layer
-   - Ensure the most recent N messages are preserved intact
-   - Replace older messages with the generated summary
+#### Phase 2: Executive-First Flow
+3. Implement executive-first planning:
+   - Create a new endpoint in the executive service for generating response plans
+   - Modify the extended mode flow to have the executive create a plan before the speaker responds
+   - Ensure the progress document is created with the detailed plan
+   - Only allow the speaker to begin responding after the plan is created
 
 4. Create progress tracking system:
    - Implement a ProgressTracker class for the executive layer
@@ -345,34 +344,42 @@
    - Create file storage for progress documents (one per thread)
    - Implement logic to replace executive history with progress document references
 
-#### Phase 3: Integration and Optimization
-5. Disable vector store in extended mode:
+#### Phase 3: Context Management
+5. Implement dynamic summarization:
+   - Create a function to measure context window utilization
+   - Add a threshold trigger for when summarization should occur
+   - Implement the summarization logic in the executive layer
+   - Ensure the most recent N messages are preserved intact
+   - Replace older messages with the generated summary
+
+6. Disable vector store in extended mode:
    - Add a flag to bypass vector store operations when in extended mode
    - Update the speaker service to check this flag before vector store operations
    - Ensure knowledge documents are still properly managed by the executive
 
-6. Implement thread persistence (optional):
+#### Phase 4: Integration and Optimization
+7. Implement thread persistence:
    - Add database storage for threads to survive service restarts
    - Implement thread serialization/deserialization
    - Add configuration options for persistence settings
 
-7. Add monitoring and diagnostics:
+8. Add monitoring and diagnostics:
    - Create endpoints to view active threads and their status
    - Add metrics for thread usage, summarization frequency, and context utilization
    - Implement logging for extended mode operations
 
-#### Phase 4: Testing and Documentation
-8. Create comprehensive tests:
+#### Phase 5: Testing and Documentation
+9. Create comprehensive tests:
    - Unit tests for ThreadManager and ProgressTracker
    - Integration tests for the extended mode API
    - Performance tests for long-running conversations
    - Edge case tests for context window management
 
-9. Update documentation:
-   - Add extended mode section to README.md
-   - Create EXTENDED_MODE.md with detailed documentation
-   - Update API documentation to include the new parameter
-   - Add examples of extended mode usage
+10. Update documentation:
+    - Add extended mode section to README.md
+    - Create EXTENDED_MODE.md with detailed documentation
+    - Update API documentation to include the new parameter
+    - Add examples of extended mode usage
 
 ### Implementation Notes:
 - The extended mode should be completely optional and not affect normal API usage
@@ -381,3 +388,24 @@
 - Progress tracking should be robust against failures and provide clear status information
 - The implementation should follow the existing architectural patterns
 - Extended mode should work seamlessly with all existing features (tool calling, JSON mode, etc.)
+- The executive-first flow is critical for complex, long-running tasks
+- The progress document serves as both a planning tool and a reference for the executive
+
+## 2025-03-12 (Afternoon)
+- Updated Extended Response Mode design in design.txt:
+  - Added detailed description of the executive-first flow
+  - Clarified the role of the progress document in planning and tracking
+  - Added implementation flow section with step-by-step process
+  - Included example use cases for extended mode
+
+- Revised implementation plan in progress.txt:
+  - Added a new phase for executive-first planning
+  - Reorganized tasks to prioritize the executive-first flow
+  - Added more detailed notes on the importance of this approach
+
+- Next steps:
+  1. Implement the core infrastructure (ThreadManager, ProgressTracker)
+  2. Create the executive-first planning endpoint
+  3. Modify the extended mode flow to follow the new design
+  4. Implement context management and summarization
+  5. Add comprehensive testing and documentation

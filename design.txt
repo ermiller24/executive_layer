@@ -49,20 +49,49 @@ The Extended Response Mode is designed to handle long-running conversations that
 
 2. **Incremental Updates**: Users only need to send new messages in each request, as the system maintains the full conversation history internally.
 
-3. **Dynamic Context Management**:
+3. **Executive-First Flow**:
+   - Unlike regular mode where the speaker starts responding immediately, in extended mode the executive creates a detailed response plan first.
+   - Only after the plan is created does the speaker begin responding, following the executive's guidance.
+   - This ensures coherence and structure in long, complex responses.
+
+4. **Dynamic Context Management**:
    - When responses approach the context window limit, the executive layer automatically generates a summary of earlier conversation history.
    - The summary replaces older messages in the context window, while keeping the most recent messages intact to maintain conversational coherence.
    - This allows for indefinitely long conversations without context overflow.
 
-4. **Progress Tracking**:
+5. **Progress Tracking**:
    - The executive layer maintains a text file documenting the response plan and tracking progress.
+   - The progress document serves as both a planning tool and a reference for the executive.
    - When the executive's own responses become lengthy, it can replace portions of its message history with references to the progress document.
    - This ensures the executive layer can maintain its reasoning capabilities even in extended conversations.
 
-5. **Vector Store Optimization**:
+6. **Vector Store Optimization**:
    - Vector store recall is disabled in extended mode.
    - This is based on the assumption that extended mode will involve many knowledge documents and interruptions with potentially long response times, making vector store recall unnecessary for performance optimization.
 
-### Implementation:
+### Implementation Flow:
+
+1. User sends a request with an `extended_thread_id`
+2. System creates or retrieves the thread
+3. For new threads:
+   - Executive creates a detailed response plan
+   - Progress document is created with the plan
+   - Speaker begins responding based on the plan
+4. For existing threads:
+   - System retrieves the thread history and progress document
+   - Executive updates the plan if needed
+   - Speaker continues responding based on the updated plan
+5. Throughout the conversation:
+   - Executive monitors the speaker's output
+   - Executive can interrupt with additional information
+   - Executive updates the progress document
+   - Context is managed dynamically to prevent overflow
 
 The extended response mode is activated by adding an `extended_thread_id` key to the POST request. Since this is an extension of the OpenAI API and not part of the standard specification, it won't accidentally activate during normal API usage.
+
+### Example Use Cases:
+
+- Long-form content creation (stories, articles, reports)
+- Complex problem-solving that requires multiple steps
+- Educational content that builds on previous explanations
+- Research projects that evolve over multiple sessions

@@ -5,6 +5,9 @@ import { HumanMessage, AIMessage, SystemMessage } from '@langchain/core/messages
 import { initChatModel } from "langchain/chat_models/universal";
 import { JsonOutputParser } from "@langchain/core/output_parsers";
 import { ChromaClient, DefaultEmbeddingFunction } from 'chromadb';
+import { ExtendedMode } from '../extended/index.js';
+import fs from 'fs/promises';
+import path from 'path';
 
 dotenv.config();
 const app = express();
@@ -16,6 +19,7 @@ const SPEAKER_PORT = process.env.SPEAKER_PORT || 8002;
 const EXECUTIVE_URL = process.env.EXECUTIVE_URL || 'http://executive:8001';
 const CHROMA_URL = process.env.CHROMA_URL || 'http://chroma:8000';
 const DEBUG = process.env.DEBUG === 'true';
+const DATA_DIR = process.env.DATA_DIR || './data';
 
 // Log debug status
 console.log(`Debug mode: ${DEBUG ? 'enabled' : 'disabled'}`);
@@ -26,6 +30,54 @@ const COLLECTION_NAME = 'eir_embeddings';
 // Initialize Chroma client and embedding function
 const chromaClient = new ChromaClient({ path: CHROMA_URL });
 const embeddingFunction = new DefaultEmbeddingFunction();
+
+// Extended mode configuration from environment variables
+const EXTENDED_MAX_CONTEXT_SIZE = parseInt(process.env.EXTENDED_MAX_CONTEXT_SIZE || '16000');
+const EXTENDED_SUMMARIZATION_THRESHOLD = parseFloat(process.env.EXTENDED_SUMMARIZATION_THRESHOLD || '0.7');
+const EXTENDED_PRESERVE_MESSAGE_COUNT = parseInt(process.env.EXTENDED_PRESERVE_MESSAGE_COUNT || '4');
+const EXTENDED_EXPIRATION_TIME = parseInt(process.env.EXTENDED_EXPIRATION_TIME || '86400000'); // 24 hours
+const EXTENDED_CLEANUP_INTERVAL = parseInt(process.env.EXTENDED_CLEANUP_INTERVAL || '3600000'); // 1 hour
+const EXTENDED_SUMMARY_MODEL = process.env.EXTENDED_SUMMARY_MODEL || 'openai:gpt-3.5-turbo';
+const EXTENDED_SUMMARY_MODEL_KWARGS = process.env.EXTENDED_SUMMARY_MODEL_KWARGS ?
+  JSON.parse(process.env.EXTENDED_SUMMARY_MODEL_KWARGS) : {};
+
+// Initialize ExtendedMode
+const extendedMode = new ExtendedMode({
+  dataDir: DATA_DIR,
+  maxContextSize: EXTENDED_MAX_CONTEXT_SIZE,
+  summarizationThreshold: EXTENDED_SUMMARIZATION_THRESHOLD,
+  preserveMessageCount: EXTENDED_PRESERVE_MESSAGE_COUNT,
+  expirationTime: EXTENDED_EXPIRATION_TIME,
+  cleanupInterval: EXTENDED_CLEANUP_INTERVAL,
+  summaryModel: EXTENDED_SUMMARY_MODEL,
+  summaryModelKwargs: EXTENDED_SUMMARY_MODEL_KWARGS,
+  executiveUrl: EXECUTIVE_URL
+});
+
+// Ensure data directory exists
+async function ensureDataDirExists() {
+  try {
+    await fs.mkdir(DATA_DIR, { recursive: true });
+    console.log(`Data directory created: ${DATA_DIR}`);
+  } catch (error) {
+    console.error('Error creating data directory:', error);
+  }
+}
+
+// Initialize extended mode
+async function initializeExtendedMode() {
+  try {
+    await ensureDataDirExists();
+    await extendedMode.initialize();
+    console.log('Extended mode initialized successfully');
+  } catch (error) {
+    console.error('Error initializing extended mode:', error);
+  }
+}
+
+// Initialize extended mode
+initializeExtendedMode()
+  .catch(error => console.error('Failed to initialize extended mode:', error));
 
 // Initialize the Chroma collection
 async function initializeCollection() {
@@ -132,7 +184,8 @@ app.post('/v1/chat/completions', async (req, res) => {
       tools,
       tool_choice,
       response_format,
-      include_executive_thinking = false // New parameter to include executive reasoning
+      include_executive_thinking = false, // Parameter to include executive reasoning
+      extended_thread_id = null // New parameter for extended response mode
     } = req.body;
 
     // Validate required parameters
@@ -147,8 +200,40 @@ app.post('/v1/chat/completions', async (req, res) => {
       });
     }
 
+    // Check if we're in extended mode
+    const isExtendedMode = !!extended_thread_id;
+    
+    // Process the request through extended mode if thread ID is provided
+    let processedReq = req;
+    let isExecutiveFirst = false;
+    if (isExtendedMode) {
+      try {
+        console.log(`[EXTENDED_MODE] Processing request for thread ${extended_thread_id}`);
+        processedReq = await extendedMode.processRequest(req);
+        
+        // Check if this is using the executive-first flow
+        isExecutiveFirst = !!processedReq.body.executive_first;
+        if (isExecutiveFirst) {
+          console.log(`[EXTENDED_MODE] Using executive-first flow for thread ${extended_thread_id}`);
+        }
+      } catch (error) {
+        console.error('Error processing extended mode request:', error);
+        return res.status(400).json({
+          error: {
+            message: `Extended mode error: ${error.message}`,
+            type: 'invalid_request_error',
+            param: 'extended_thread_id',
+            code: 'extended_mode_error'
+          }
+        });
+      }
+    }
+    
+    // Get the processed messages (either original or from extended mode)
+    const processedMessages = processedReq.body.messages;
+    
     // Get the user's message
-    const userMessageContent = messages[messages.length - 1].content;
+    const userMessageContent = processedMessages[processedMessages.length - 1].content;
     // Convert content to string for logging and vector store
     const userMessage = typeof userMessageContent === 'string'
       ? userMessageContent
@@ -156,46 +241,52 @@ app.post('/v1/chat/completions', async (req, res) => {
         ? JSON.stringify(userMessageContent)
         : String(userMessageContent || '');
     
-    // Query the vector store for relevant context
+    // Query the vector store for relevant context (skip in extended mode)
     let vectorStoreContext = null;
-    try {
-      if (chromaCollection) {
-        console.log(`[VECTOR_STORE] Querying ChromaDB for context related to: "${userMessage.substring(0, 50)}..."`);
-        
-        // Search for similar items in ChromaDB using the built-in embedding function
-        const searchResult = await chromaCollection.query({
-          queryTexts: [userMessage],
-          nResults: 3,
-        });
-        
-        if (searchResult && searchResult.ids && searchResult.ids.length > 0 && searchResult.ids[0].length > 0) {
-          // Format results
-          vectorStoreContext = searchResult.ids[0].map((id, index) => ({
-            id: id,
-            text: searchResult.documents[0][index],
-            metadata: searchResult.metadatas[0][index],
-            timestamp: searchResult.metadatas[0][index].timestamp,
-            score: searchResult.distances[0][index]
-          }));
+    const vectorStoreDisabled = isExtendedMode || processedReq.body.vector_store_disabled;
+    
+    if (!vectorStoreDisabled) {
+      try {
+        if (chromaCollection) {
+          console.log(`[VECTOR_STORE] Querying ChromaDB for context related to: "${userMessage.substring(0, 50)}..."`);
           
-          console.log(`[VECTOR_STORE] Found ${vectorStoreContext.length} relevant items in vector store`);
-          vectorStoreContext.forEach((item, i) => {
-            console.log(`[VECTOR_STORE] Result ${i+1}: ID=${item.id}, Score=${item.score.toFixed(4)}, Timestamp=${item.timestamp}`);
-            console.log(`[VECTOR_STORE] Content snippet: "${item.text.substring(0, 100)}..."`);
+          // Search for similar items in ChromaDB using the built-in embedding function
+          const searchResult = await chromaCollection.query({
+            queryTexts: [userMessage],
+            nResults: 3,
           });
+          
+          if (searchResult && searchResult.ids && searchResult.ids.length > 0 && searchResult.ids[0].length > 0) {
+            // Format results
+            vectorStoreContext = searchResult.ids[0].map((id, index) => ({
+              id: id,
+              text: searchResult.documents[0][index],
+              metadata: searchResult.metadatas[0][index],
+              timestamp: searchResult.metadatas[0][index].timestamp,
+              score: searchResult.distances[0][index]
+            }));
+            
+            console.log(`[VECTOR_STORE] Found ${vectorStoreContext.length} relevant items in vector store`);
+            vectorStoreContext.forEach((item, i) => {
+              console.log(`[VECTOR_STORE] Result ${i+1}: ID=${item.id}, Score=${item.score.toFixed(4)}, Timestamp=${item.timestamp}`);
+              console.log(`[VECTOR_STORE] Content snippet: "${item.text.substring(0, 100)}..."`);
+            });
+          } else {
+            console.log('[VECTOR_STORE] No relevant items found in vector store');
+          }
         } else {
-          console.log('[VECTOR_STORE] No relevant items found in vector store');
+          console.warn('[VECTOR_STORE] ChromaDB collection not available, skipping context retrieval');
         }
-      } else {
-        console.warn('[VECTOR_STORE] ChromaDB collection not available, skipping context retrieval');
+      } catch (error) {
+        console.warn('[VECTOR_STORE] Error querying vector store:', error.message);
+        // Continue without vector store context
       }
-    } catch (error) {
-      console.warn('[VECTOR_STORE] Error querying vector store:', error.message);
-      // Continue without vector store context
+    } else {
+      console.log('[VECTOR_STORE] Vector store disabled for this request');
     }
 
     // Prepare messages with vector store context if available
-    const speakerMessages = [...messages];
+    const speakerMessages = [...processedMessages];
     
     if (vectorStoreContext) {
       // Insert vector store context as a system message before the user's message
@@ -209,9 +300,9 @@ app.post('/v1/chat/completions', async (req, res) => {
     }
 
     // Start the executive process in parallel
-    const executiveRequest = {
+    let executiveRequest = {
       original_query: userMessage,
-      messages: messages.map(msg => ({
+      messages: processedMessages.map(msg => ({
         ...msg,
         content: typeof msg.content === 'string'
           ? msg.content
@@ -223,8 +314,32 @@ app.post('/v1/chat/completions', async (req, res) => {
       speaker_output: ''
     };
     
+    // Process the executive request through extended mode if needed
+    if (isExtendedMode) {
+      try {
+        executiveRequest = await extendedMode.processExecutiveRequest(executiveRequest, { originalReq: processedReq });
+      } catch (error) {
+        console.error('Error processing extended mode executive request:', error);
+        // Continue with the original request
+      }
+    }
+    
     // Connect to the executive service
     const executivePromise = axios.post(`${EXECUTIVE_URL}/evaluate`, executiveRequest)
+      .then(async response => {
+        // Process the executive response through extended mode if needed
+        if (isExtendedMode) {
+          try {
+            return {
+              data: await extendedMode.processExecutiveResponse(extended_thread_id, response.data)
+            };
+          } catch (error) {
+            console.error('Error processing extended mode executive response:', error);
+            return response;
+          }
+        }
+        return response;
+      })
       .catch(error => {
         console.warn('Executive evaluation error:', error.message);
         // Return a default response if executive fails
@@ -242,7 +357,9 @@ app.post('/v1/chat/completions', async (req, res) => {
       tool_choice,
       response_format,
       include_executive_thinking, // Pass the new parameter
-      executivePromise
+      executivePromise,
+      extended_thread_id, // Pass the thread ID for extended mode
+      isExtendedMode // Flag to indicate extended mode
     }, req, res);
   } catch (error) {
     console.error('Error in chat completions:', error);
@@ -262,6 +379,127 @@ app.post('/embeddings', async (req, res) => {
   // Forward the request to the /v1/embeddings handler
   req.url = '/v1/embeddings';
   app._router.handle(req, res);
+});
+
+// Extended mode endpoints
+// Get progress document for a thread
+app.get('/v1/extended/progress/:threadId', async (req, res) => {
+  try {
+    const { threadId } = req.params;
+    
+    if (!threadId) {
+      return res.status(400).json({
+        error: {
+          message: 'Thread ID is required',
+          type: 'invalid_request_error',
+          param: 'threadId',
+          code: 'invalid_thread_id'
+        }
+      });
+    }
+    
+    // Get the progress document
+    const progressDoc = await extendedMode.getProgressDocument(threadId);
+    
+    if (!progressDoc) {
+      return res.status(404).json({
+        error: {
+          message: `No progress document found for thread ${threadId}`,
+          type: 'not_found_error',
+          param: 'threadId',
+          code: 'thread_not_found'
+        }
+      });
+    }
+    
+    res.json({
+      thread_id: threadId,
+      progress_document: progressDoc,
+      timestamp: new Date().toISOString()
+    });
+  } catch (error) {
+    console.error('Error getting progress document:', error);
+    res.status(500).json({
+      error: {
+        message: 'An error occurred while retrieving the progress document',
+        type: 'server_error',
+        param: null,
+        code: 'internal_server_error'
+      }
+    });
+  }
+});
+
+// List all active threads
+app.get('/v1/extended/threads', async (req, res) => {
+  try {
+    // Get all threads
+    const threads = await extendedMode.getAllThreads();
+    
+    res.json({
+      threads,
+      count: threads.length,
+      timestamp: new Date().toISOString()
+    });
+  } catch (error) {
+    console.error('Error listing threads:', error);
+    res.status(500).json({
+      error: {
+        message: 'An error occurred while listing threads',
+        type: 'server_error',
+        param: null,
+        code: 'internal_server_error'
+      }
+    });
+  }
+});
+
+// Delete a thread
+app.delete('/v1/extended/threads/:threadId', async (req, res) => {
+  try {
+    const { threadId } = req.params;
+    
+    if (!threadId) {
+      return res.status(400).json({
+        error: {
+          message: 'Thread ID is required',
+          type: 'invalid_request_error',
+          param: 'threadId',
+          code: 'invalid_thread_id'
+        }
+      });
+    }
+    
+    // Delete the thread
+    const deleted = await extendedMode.deleteThread(threadId);
+    
+    if (!deleted) {
+      return res.status(404).json({
+        error: {
+          message: `Thread ${threadId} not found`,
+          type: 'not_found_error',
+          param: 'threadId',
+          code: 'thread_not_found'
+        }
+      });
+    }
+    
+    res.json({
+      thread_id: threadId,
+      deleted: true,
+      timestamp: new Date().toISOString()
+    });
+  } catch (error) {
+    console.error('Error deleting thread:', error);
+    res.status(500).json({
+      error: {
+        message: 'An error occurred while deleting the thread',
+        type: 'server_error',
+        param: null,
+        code: 'internal_server_error'
+      }
+    });
+  }
 });
 
 // OpenAI-compatible embeddings endpoint
@@ -331,7 +569,9 @@ async function handleChatRequest(messages, options, req, res) {
       tool_choice,
       response_format,
       include_executive_thinking = false, // Extract the new parameter
-      executivePromise: initialExecutivePromise
+      executivePromise: initialExecutivePromise,
+      extended_thread_id = null, // Extract the thread ID for extended mode
+      isExtendedMode = false // Extract the extended mode flag
     } = options;
     
     // Create a mutable variable for the executive promise
@@ -438,6 +678,13 @@ async function handleChatRequest(messages, options, req, res) {
           : Array.isArray(userMessageContent)
             ? JSON.stringify(userMessageContent)
             : String(userMessageContent || '');
+        
+        let debugContent = `[DEBUG] User Query: ${userQuery}\n\n`;
+        
+        // Add information about executive-first flow if applicable
+        if (isExtendedMode && isExecutiveFirst) {
+          debugContent += `[DEBUG] Using executive-first flow with response plan\n\n`;
+        }
             
         const debugQueryEvent = {
           id: `debug-${Date.now()}`,
@@ -447,7 +694,7 @@ async function handleChatRequest(messages, options, req, res) {
           choices: [{
             index: 0,
             delta: {
-              content: `[DEBUG] User Query: ${userQuery}\n\n`
+              content: debugContent
             },
             finish_reason: null
           }]
@@ -981,6 +1228,16 @@ async function handleChatRequest(messages, options, req, res) {
         } catch (error) {
           console.warn('[VECTOR_STORE] Error storing in vector store:', error.message);
         }
+        
+        // Update the progress document in extended mode
+        if (isExtendedMode && extended_thread_id) {
+          try {
+            console.log(`[EXTENDED_MODE] Updating progress document for thread ${extended_thread_id} with streaming response`);
+            await extendedMode.updateProgressWithResponse(extended_thread_id, speakerOutput);
+          } catch (error) {
+            console.error(`[EXTENDED_MODE] Error updating progress document: ${error.message}`);
+          }
+        }
       } catch (error) {
         console.error('Error streaming response:', error);
         // Try to send an error event if possible
@@ -1068,13 +1325,26 @@ async function handleChatRequest(messages, options, req, res) {
             : Array.isArray(userMessageContent)
               ? JSON.stringify(userMessageContent)
               : String(userMessageContent || '');
+          
+          // Add debug information
+          let debugInfo = { query: userQuery };
+          
+          // Add information about executive-first flow if applicable
+          if (isExtendedMode && isExecutiveFirst) {
+            debugInfo.mode = "executive-first";
+            debugInfo.note = "Using executive response plan";
+          }
               
           // In JSON mode, we need to maintain valid JSON
           if (isJsonMode) {
-            const debugObj = { debug: { query: userQuery }, result: JSON.parse(content) };
+            const debugObj = { debug: debugInfo, result: JSON.parse(content) };
             content = JSON.stringify(debugObj);
           } else {
-            content = `[DEBUG] User Query: ${userQuery}\n\n${content}`;
+            let debugContent = `[DEBUG] User Query: ${userQuery}\n\n`;
+            if (isExtendedMode && isExecutiveFirst) {
+              debugContent += `[DEBUG] Using executive-first flow with response plan\n\n`;
+            }
+            content = `${debugContent}${content}`;
           }
         }
         
@@ -1267,6 +1537,17 @@ async function handleChatRequest(messages, options, req, res) {
           }
         } catch (error) {
           console.warn('[VECTOR_STORE] Error storing in vector store:', error.message);
+        }
+        
+        // Update the progress document in extended mode
+        if (isExtendedMode && extended_thread_id) {
+          try {
+            console.log(`[EXTENDED_MODE] Updating progress document for thread ${extended_thread_id} with non-streaming response`);
+            const responseContent = formattedResponse.choices[0].message.content || '';
+            await extendedMode.updateProgressWithResponse(extended_thread_id, responseContent);
+          } catch (error) {
+            console.error(`[EXTENDED_MODE] Error updating progress document: ${error.message}`);
+          }
         }
         
         res.json(formattedResponse);
