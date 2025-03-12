@@ -308,3 +308,76 @@
   - Add comprehensive logging for debugging
   - Optimize performance of the integrated system
   - Improve the knowledge graph management
+  - Implement Extended Response Mode
+
+## 2025-03-12
+- Added Extended Response Mode design to design.txt:
+  - Documented the concept, features, and implementation approach
+  - Clarified how it integrates with the existing Executive Layer architecture
+  - Specified the API extension mechanism using the `extended_thread_id` parameter
+
+### Extended Response Mode Implementation Plan:
+
+#### Phase 1: Core Infrastructure
+1. Create thread storage mechanism:
+   - Implement a ThreadManager class to store and retrieve conversation threads
+   - Add methods for creating, updating, and retrieving threads by ID
+   - Implement thread expiration/cleanup mechanism to prevent memory leaks
+   - Add thread metadata tracking (creation time, last access, message count)
+
+2. Modify API endpoint to support extended mode:
+   - Update the chat completions endpoint to recognize the `extended_thread_id` parameter
+   - Add logic to retrieve existing thread history when an ID is provided
+   - Implement message appending for incremental updates
+   - Add validation for thread IDs and message formats
+
+#### Phase 2: Context Management
+3. Implement dynamic summarization:
+   - Create a function to measure context window utilization
+   - Add a threshold trigger for when summarization should occur
+   - Implement the summarization logic in the executive layer
+   - Ensure the most recent N messages are preserved intact
+   - Replace older messages with the generated summary
+
+4. Create progress tracking system:
+   - Implement a ProgressTracker class for the executive layer
+   - Add methods to create, update, and read progress documents
+   - Create file storage for progress documents (one per thread)
+   - Implement logic to replace executive history with progress document references
+
+#### Phase 3: Integration and Optimization
+5. Disable vector store in extended mode:
+   - Add a flag to bypass vector store operations when in extended mode
+   - Update the speaker service to check this flag before vector store operations
+   - Ensure knowledge documents are still properly managed by the executive
+
+6. Implement thread persistence (optional):
+   - Add database storage for threads to survive service restarts
+   - Implement thread serialization/deserialization
+   - Add configuration options for persistence settings
+
+7. Add monitoring and diagnostics:
+   - Create endpoints to view active threads and their status
+   - Add metrics for thread usage, summarization frequency, and context utilization
+   - Implement logging for extended mode operations
+
+#### Phase 4: Testing and Documentation
+8. Create comprehensive tests:
+   - Unit tests for ThreadManager and ProgressTracker
+   - Integration tests for the extended mode API
+   - Performance tests for long-running conversations
+   - Edge case tests for context window management
+
+9. Update documentation:
+   - Add extended mode section to README.md
+   - Create EXTENDED_MODE.md with detailed documentation
+   - Update API documentation to include the new parameter
+   - Add examples of extended mode usage
+
+### Implementation Notes:
+- The extended mode should be completely optional and not affect normal API usage
+- Thread storage should be memory-efficient to handle many concurrent threads
+- Summarization should be intelligent enough to preserve important context
+- Progress tracking should be robust against failures and provide clear status information
+- The implementation should follow the existing architectural patterns
+- Extended mode should work seamlessly with all existing features (tool calling, JSON mode, etc.)

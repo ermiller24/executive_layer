@@ -35,4 +35,34 @@ Then we implement the vector store. In theory the vector store should almost be 
 
 # EXTENSIONS
 
+## External Knowledge Infrastructure
+
 Externally hosting both the knowledge graph and the vector store. This would allow multiple instances to be running while all sharing the same knowledge base and learning in real time. As the size of the system grows we have to worry that too many systems might make the knowledge graph too muddy, and so we implement separate knowledge graph managers from the executive layers. This is more of an enterprise-grade problem, so we don't need to do this unless we get good traction.
+
+## Extended Response Mode
+
+The Extended Response Mode is designed to handle long-running conversations that may exceed context window limitations. This mode enables the system to maintain conversation history across multiple requests without requiring the client to send the full history each time.
+
+### Key Features:
+
+1. **Thread Tracking**: The system tracks conversations by a user-provided `extended_thread_id`, which can be any string. This allows the system to maintain conversation state between requests.
+
+2. **Incremental Updates**: Users only need to send new messages in each request, as the system maintains the full conversation history internally.
+
+3. **Dynamic Context Management**:
+   - When responses approach the context window limit, the executive layer automatically generates a summary of earlier conversation history.
+   - The summary replaces older messages in the context window, while keeping the most recent messages intact to maintain conversational coherence.
+   - This allows for indefinitely long conversations without context overflow.
+
+4. **Progress Tracking**:
+   - The executive layer maintains a text file documenting the response plan and tracking progress.
+   - When the executive's own responses become lengthy, it can replace portions of its message history with references to the progress document.
+   - This ensures the executive layer can maintain its reasoning capabilities even in extended conversations.
+
+5. **Vector Store Optimization**:
+   - Vector store recall is disabled in extended mode.
+   - This is based on the assumption that extended mode will involve many knowledge documents and interruptions with potentially long response times, making vector store recall unnecessary for performance optimization.
+
+### Implementation:
+
+The extended response mode is activated by adding an `extended_thread_id` key to the POST request. Since this is an extension of the OpenAI API and not part of the standard specification, it won't accidentally activate during normal API usage.
