@@ -440,7 +440,14 @@ Respond with a JSON object with the following structure:
     try {
       // Extract JSON from the result (it might be wrapped in markdown code blocks)
       const jsonMatch = result.match(/```json\n([\s\S]*?)\n```/) || result.match(/```\n([\s\S]*?)\n```/) || result.match(/{[\s\S]*?}/);
-      const jsonStr = jsonMatch ? jsonMatch[0] : result;
+      
+      // If we matched a code block, extract the content inside the block (group 1)
+      // Otherwise, use the entire match or fall back to the original result
+      const jsonStr = jsonMatch
+        ? (jsonMatch[1] !== undefined ? jsonMatch[1] : jsonMatch[0])
+        : result;
+      
+      console.log('Parsing JSON string:', jsonStr.substring(0, 100) + (jsonStr.length > 100 ? '...' : ''));
       const evaluation = JSON.parse(jsonStr);
       
       // Ensure the evaluation has the required fields
