@@ -4,8 +4,6 @@ import axios from 'axios';
 import { HumanMessage, AIMessage, SystemMessage } from '@langchain/core/messages';
 import { initChatModel } from "langchain/chat_models/universal";
 import { JsonOutputParser } from "@langchain/core/output_parsers";
-import { ChromaClient, DefaultEmbeddingFunction } from 'chromadb';
-import { ExtendedMode } from '../extended/index.js';
 import fs from 'fs/promises';
 import path from 'path';
 
@@ -17,113 +15,10 @@ app.use(express.json());
 const PORT = process.env.API_PORT || 3000;
 const SPEAKER_PORT = process.env.SPEAKER_PORT || 8002;
 const EXECUTIVE_URL = process.env.EXECUTIVE_URL || 'http://executive:8001';
-const CHROMA_URL = process.env.CHROMA_URL || 'http://chroma:8000';
 const DEBUG = process.env.DEBUG === 'true';
-const DATA_DIR = process.env.DATA_DIR || './data';
 
 // Log debug status
 console.log(`Debug mode: ${DEBUG ? 'enabled' : 'disabled'}`);
-
-// Collection name for storing embeddings
-const COLLECTION_NAME = 'eir_embeddings';
-
-// Initialize Chroma client and embedding function
-const chromaClient = new ChromaClient({ path: CHROMA_URL });
-const embeddingFunction = new DefaultEmbeddingFunction();
-
-// Extended mode configuration from environment variables
-const EXTENDED_MAX_CONTEXT_SIZE = parseInt(process.env.EXTENDED_MAX_CONTEXT_SIZE || '16000');
-const EXTENDED_SUMMARIZATION_THRESHOLD = parseFloat(process.env.EXTENDED_SUMMARIZATION_THRESHOLD || '0.7');
-const EXTENDED_PRESERVE_MESSAGE_COUNT = parseInt(process.env.EXTENDED_PRESERVE_MESSAGE_COUNT || '4');
-const EXTENDED_EXPIRATION_TIME = parseInt(process.env.EXTENDED_EXPIRATION_TIME || '86400000'); // 24 hours
-const EXTENDED_CLEANUP_INTERVAL = parseInt(process.env.EXTENDED_CLEANUP_INTERVAL || '3600000'); // 1 hour
-const EXTENDED_SUMMARY_MODEL = process.env.EXTENDED_SUMMARY_MODEL || 'openai:gpt-3.5-turbo';
-const EXTENDED_SUMMARY_MODEL_KWARGS = process.env.EXTENDED_SUMMARY_MODEL_KWARGS ?
-  JSON.parse(process.env.EXTENDED_SUMMARY_MODEL_KWARGS) : {};
-
-// Initialize ExtendedMode
-const extendedMode = new ExtendedMode({
-  dataDir: DATA_DIR,
-  maxContextSize: EXTENDED_MAX_CONTEXT_SIZE,
-  summarizationThreshold: EXTENDED_SUMMARIZATION_THRESHOLD,
-  preserveMessageCount: EXTENDED_PRESERVE_MESSAGE_COUNT,
-  expirationTime: EXTENDED_EXPIRATION_TIME,
-  cleanupInterval: EXTENDED_CLEANUP_INTERVAL,
-  summaryModel: EXTENDED_SUMMARY_MODEL,
-  summaryModelKwargs: EXTENDED_SUMMARY_MODEL_KWARGS,
-  executiveUrl: EXECUTIVE_URL
-});
-
-// Ensure data directory exists
-async function ensureDataDirExists() {
-  try {
-    await fs.mkdir(DATA_DIR, { recursive: true });
-    console.log(`Data directory created: ${DATA_DIR}`);
-  } catch (error) {
-    console.error('Error creating data directory:', error);
-  }
-}
-
-// Initialize extended mode
-async function initializeExtendedMode() {
-  try {
-    await ensureDataDirExists();
-    await extendedMode.initialize();
-    console.log('Extended mode initialized successfully');
-  } catch (error) {
-    console.error('Error initializing extended mode:', error);
-  }
-}
-
-// Initialize extended mode
-initializeExtendedMode()
-  .catch(error => console.error('Failed to initialize extended mode:', error));
-
-// Initialize the Chroma collection
-async function initializeCollection() {
-  try {
-    // Check if collection exists by listing all collections
-    const collections = await chromaClient.listCollections();
-    const collectionExists = collections.some(collection => collection.name === COLLECTION_NAME);
-
-    if (!collectionExists) {
-      // Create collection
-      await chromaClient.createCollection({
-        name: COLLECTION_NAME,
-        metadata: { description: "EIR embeddings collection" },
-        embeddingFunction: embeddingFunction
-      });
-      console.log(`Created collection ${COLLECTION_NAME}`);
-    } else {
-      console.log(`Collection ${COLLECTION_NAME} already exists`);
-    }
-
-    // Get the collection
-    const collection = await chromaClient.getCollection({
-      name: COLLECTION_NAME,
-      embeddingFunction: embeddingFunction
-    });
-    console.log(`Successfully connected to collection ${COLLECTION_NAME}`);
-    
-    return collection;
-  } catch (error) {
-    console.error('Error initializing Chroma collection:', error);
-    console.warn('Vector store functionality will be limited');
-    return null;
-  }
-}
-
-// Initialize the collection
-let chromaCollection;
-initializeCollection()
-  .then(collection => {
-    chromaCollection = collection;
-    console.log('ChromaDB collection initialized successfully');
-  })
-  .catch(error => {
-    console.error('Failed to initialize ChromaDB collection:', error);
-    console.warn('Vector store functionality will be limited');
-  });
 
 // Model configuration
 const MODEL = process.env.SPEAKER_MODEL || 'openai:gpt-4o';
@@ -184,8 +79,7 @@ app.post('/v1/chat/completions', async (req, res) => {
       tools,
       tool_choice,
       response_format,
-      include_executive_thinking = false, // Parameter to include executive reasoning
-      extended_thread_id = null // New parameter for extended response mode
+      include_executive_thinking = false // Parameter to include executive reasoning
     } = req.body;
 
     // Validate required parameters
@@ -199,100 +93,86 @@ app.post('/v1/chat/completions', async (req, res) => {
         }
       });
     }
-
-    // Check if we're in extended mode
-    const isExtendedMode = !!extended_thread_id;
-    
-    // Process the request through extended mode if thread ID is provided
-    let processedReq = req;
-    let isExecutiveFirst = false;
-    if (isExtendedMode) {
-      try {
-        console.log(`[EXTENDED_MODE] Processing request for thread ${extended_thread_id}`);
-        processedReq = await extendedMode.processRequest(req);
-        
-        // Check if this is using the executive-first flow
-        isExecutiveFirst = !!processedReq.body.executive_first;
-        if (isExecutiveFirst) {
-          console.log(`[EXTENDED_MODE] Using executive-first flow for thread ${extended_thread_id}`);
-        }
-      } catch (error) {
-        console.error('Error processing extended mode request:', error);
-        return res.status(400).json({
-          error: {
-            message: `Extended mode error: ${error.message}`,
-            type: 'invalid_request_error',
-            param: 'extended_thread_id',
-            code: 'extended_mode_error'
-          }
-        });
-      }
-    }
-    
-    // Get the processed messages (either original or from extended mode)
-    const processedMessages = processedReq.body.messages;
     
     // Get the user's message
-    const userMessageContent = processedMessages[processedMessages.length - 1].content;
-    // Convert content to string for logging and vector store
+    const userMessageContent = messages[messages.length - 1].content;
+    // Convert content to string for logging
     const userMessage = typeof userMessageContent === 'string'
       ? userMessageContent
       : Array.isArray(userMessageContent)
         ? JSON.stringify(userMessageContent)
         : String(userMessageContent || '');
     
-    // Query the vector store for relevant context (skip in extended mode)
-    let vectorStoreContext = null;
-    const vectorStoreDisabled = isExtendedMode || processedReq.body.vector_store_disabled;
-    
-    if (!vectorStoreDisabled) {
-      try {
-        if (chromaCollection) {
-          console.log(`[VECTOR_STORE] Querying ChromaDB for context related to: "${userMessage.substring(0, 50)}..."`);
-          
-          // Search for similar items in ChromaDB using the built-in embedding function
-          const searchResult = await chromaCollection.query({
-            queryTexts: [userMessage],
-            nResults: 3,
-          });
-          
-          if (searchResult && searchResult.ids && searchResult.ids.length > 0 && searchResult.ids[0].length > 0) {
-            // Format results
-            vectorStoreContext = searchResult.ids[0].map((id, index) => ({
-              id: id,
-              text: searchResult.documents[0][index],
-              metadata: searchResult.metadatas[0][index],
-              timestamp: searchResult.metadatas[0][index].timestamp,
-              score: searchResult.distances[0][index]
-            }));
+    // Query the knowledge graph for relevant context using the executive service
+    let knowledgeContext = null;
+    try {
+      console.log(`[KNOWLEDGE_GRAPH] Querying knowledge graph for context related to: "${userMessage.substring(0, 50)}..."`);
+      
+      // Use the executive service to perform a vector search
+      const searchResponse = await axios.post(`${EXECUTIVE_URL}/debug/query`, {
+        query: `Use the knowledge_vector_search tool to find information related to: "${userMessage}"`,
+        tool_params: {
+          nodeType: 'knowledge',
+          text: userMessage,
+          limit: 3,
+          minSimilarity: 0.6
+        }
+      });
+      
+      if (searchResponse.data && searchResponse.data.result) {
+        // Extract the search results from the executive response
+        const resultText = searchResponse.data.result;
+        
+        // Try to extract the JSON results from the response
+        const jsonMatch = resultText.match(/```json\n([\s\S]*?)\n```/) || 
+                          resultText.match(/```\n([\s\S]*?)\n```/) || 
+                          resultText.match(/\[([\s\S]*?)\]/);
+        
+        if (jsonMatch) {
+          try {
+            const jsonResults = JSON.parse(jsonMatch[0]);
             
-            console.log(`[VECTOR_STORE] Found ${vectorStoreContext.length} relevant items in vector store`);
-            vectorStoreContext.forEach((item, i) => {
-              console.log(`[VECTOR_STORE] Result ${i+1}: ID=${item.id}, Score=${item.score.toFixed(4)}, Timestamp=${item.timestamp}`);
-              console.log(`[VECTOR_STORE] Content snippet: "${item.text.substring(0, 100)}..."`);
-            });
-          } else {
-            console.log('[VECTOR_STORE] No relevant items found in vector store');
+            if (Array.isArray(jsonResults) && jsonResults.length > 0) {
+              // Format results
+              knowledgeContext = jsonResults.map(item => ({
+                id: item.id,
+                name: item.name,
+                description: item.description,
+                score: item.score
+              }));
+              
+              console.log(`[KNOWLEDGE_GRAPH] Found ${knowledgeContext.length} relevant items in knowledge graph`);
+              knowledgeContext.forEach((item, i) => {
+                console.log(`[KNOWLEDGE_GRAPH] Result ${i+1}: ID=${item.id}, Score=${item.score.toFixed(4)}, Name=${item.name}`);
+                console.log(`[KNOWLEDGE_GRAPH] Content snippet: "${item.description.substring(0, 100)}..."`);
+              });
+            } else {
+              console.log('[KNOWLEDGE_GRAPH] No relevant items found in knowledge graph');
+            }
+          } catch (parseError) {
+            console.error('[KNOWLEDGE_GRAPH] Error parsing search results:', parseError);
           }
         } else {
-          console.warn('[VECTOR_STORE] ChromaDB collection not available, skipping context retrieval');
+          console.log('[KNOWLEDGE_GRAPH] No structured results found in executive response');
         }
-      } catch (error) {
-        console.warn('[VECTOR_STORE] Error querying vector store:', error.message);
-        // Continue without vector store context
+      } else {
+        console.log('[KNOWLEDGE_GRAPH] No results returned from executive service');
       }
-    } else {
-      console.log('[VECTOR_STORE] Vector store disabled for this request');
+    } catch (error) {
+      console.warn('[KNOWLEDGE_GRAPH] Error querying knowledge graph:', error.message);
+      // Continue without knowledge graph context
     }
 
-    // Prepare messages with vector store context if available
-    const speakerMessages = [...processedMessages];
+    // Prepare messages with knowledge graph context if available
+    const speakerMessages = [...messages];
     
-    if (vectorStoreContext) {
-      // Insert vector store context as a system message before the user's message
+    if (knowledgeContext) {
+      // Insert knowledge graph context as a system message before the user's message
       const contextMessage = {
         role: 'system',
-        content: `Relevant context from previous conversations:\n${vectorStoreContext.map(item => item.text).join('\n\n')}`
+        content: `Relevant context from knowledge graph:\n${knowledgeContext.map(item => 
+          `${item.name} (similarity: ${item.score.toFixed(2)}):\n${item.description}`
+        ).join('\n\n')}`
       };
       
       // Insert before the last message (which is the user's message)
@@ -302,7 +182,7 @@ app.post('/v1/chat/completions', async (req, res) => {
     // Start the executive process in parallel
     let executiveRequest = {
       original_query: userMessage,
-      messages: processedMessages.map(msg => ({
+      messages: messages.map(msg => ({
         ...msg,
         content: typeof msg.content === 'string'
           ? msg.content
@@ -314,32 +194,8 @@ app.post('/v1/chat/completions', async (req, res) => {
       speaker_output: ''
     };
     
-    // Process the executive request through extended mode if needed
-    if (isExtendedMode) {
-      try {
-        executiveRequest = await extendedMode.processExecutiveRequest(executiveRequest, { originalReq: processedReq });
-      } catch (error) {
-        console.error('Error processing extended mode executive request:', error);
-        // Continue with the original request
-      }
-    }
-    
     // Connect to the executive service
     const executivePromise = axios.post(`${EXECUTIVE_URL}/evaluate`, executiveRequest)
-      .then(async response => {
-        // Process the executive response through extended mode if needed
-        if (isExtendedMode) {
-          try {
-            return {
-              data: await extendedMode.processExecutiveResponse(extended_thread_id, response.data)
-            };
-          } catch (error) {
-            console.error('Error processing extended mode executive response:', error);
-            return response;
-          }
-        }
-        return response;
-      })
       .catch(error => {
         console.warn('Executive evaluation error:', error.message);
         // Return a default response if executive fails
@@ -357,9 +213,7 @@ app.post('/v1/chat/completions', async (req, res) => {
       tool_choice,
       response_format,
       include_executive_thinking, // Pass the new parameter
-      executivePromise,
-      extended_thread_id, // Pass the thread ID for extended mode
-      isExtendedMode // Flag to indicate extended mode
+      executivePromise
     }, req, res);
   } catch (error) {
     console.error('Error in chat completions:', error);
@@ -379,127 +233,6 @@ app.post('/embeddings', async (req, res) => {
   // Forward the request to the /v1/embeddings handler
   req.url = '/v1/embeddings';
   app._router.handle(req, res);
-});
-
-// Extended mode endpoints
-// Get progress document for a thread
-app.get('/v1/extended/progress/:threadId', async (req, res) => {
-  try {
-    const { threadId } = req.params;
-    
-    if (!threadId) {
-      return res.status(400).json({
-        error: {
-          message: 'Thread ID is required',
-          type: 'invalid_request_error',
-          param: 'threadId',
-          code: 'invalid_thread_id'
-        }
-      });
-    }
-    
-    // Get the progress document
-    const progressDoc = await extendedMode.getProgressDocument(threadId);
-    
-    if (!progressDoc) {
-      return res.status(404).json({
-        error: {
-          message: `No progress document found for thread ${threadId}`,
-          type: 'not_found_error',
-          param: 'threadId',
-          code: 'thread_not_found'
-        }
-      });
-    }
-    
-    res.json({
-      thread_id: threadId,
-      progress_document: progressDoc,
-      timestamp: new Date().toISOString()
-    });
-  } catch (error) {
-    console.error('Error getting progress document:', error);
-    res.status(500).json({
-      error: {
-        message: 'An error occurred while retrieving the progress document',
-        type: 'server_error',
-        param: null,
-        code: 'internal_server_error'
-      }
-    });
-  }
-});
-
-// List all active threads
-app.get('/v1/extended/threads', async (req, res) => {
-  try {
-    // Get all threads
-    const threads = await extendedMode.getAllThreads();
-    
-    res.json({
-      threads,
-      count: threads.length,
-      timestamp: new Date().toISOString()
-    });
-  } catch (error) {
-    console.error('Error listing threads:', error);
-    res.status(500).json({
-      error: {
-        message: 'An error occurred while listing threads',
-        type: 'server_error',
-        param: null,
-        code: 'internal_server_error'
-      }
-    });
-  }
-});
-
-// Delete a thread
-app.delete('/v1/extended/threads/:threadId', async (req, res) => {
-  try {
-    const { threadId } = req.params;
-    
-    if (!threadId) {
-      return res.status(400).json({
-        error: {
-          message: 'Thread ID is required',
-          type: 'invalid_request_error',
-          param: 'threadId',
-          code: 'invalid_thread_id'
-        }
-      });
-    }
-    
-    // Delete the thread
-    const deleted = await extendedMode.deleteThread(threadId);
-    
-    if (!deleted) {
-      return res.status(404).json({
-        error: {
-          message: `Thread ${threadId} not found`,
-          type: 'not_found_error',
-          param: 'threadId',
-          code: 'thread_not_found'
-        }
-      });
-    }
-    
-    res.json({
-      thread_id: threadId,
-      deleted: true,
-      timestamp: new Date().toISOString()
-    });
-  } catch (error) {
-    console.error('Error deleting thread:', error);
-    res.status(500).json({
-      error: {
-        message: 'An error occurred while deleting the thread',
-        type: 'server_error',
-        param: null,
-        code: 'internal_server_error'
-      }
-    });
-  }
 });
 
 // OpenAI-compatible embeddings endpoint
@@ -522,9 +255,46 @@ app.post('/v1/embeddings', async (req, res) => {
     // Convert input to array if it's a string
     const inputArray = Array.isArray(input) ? input : [input];
     
-    // Generate embeddings using ChromaDB's default embedding function
+    // Generate embeddings using the executive service
     const embeddingArrays = await Promise.all(
-      inputArray.map(t => embeddingFunction.generate(t))
+      inputArray.map(async (text) => {
+        try {
+          // Use the executive service to generate embeddings
+          const response = await axios.post(`${EXECUTIVE_URL}/debug/query`, {
+            query: `Generate an embedding for the following text and return it as a JSON array: "${text.substring(0, 100)}${text.length > 100 ? '...' : ''}"`,
+            tool_params: {
+              text: text
+            }
+          });
+          
+          if (response.data && response.data.result) {
+            // Try to extract the embedding array from the response
+            const jsonMatch = response.data.result.match(/\[([\s\S]*?)\]/) || 
+                              response.data.result.match(/```json\n([\s\S]*?)\n```/) || 
+                              response.data.result.match(/```\n([\s\S]*?)\n```/);
+            
+            if (jsonMatch) {
+              try {
+                // Parse the embedding array
+                const embedding = JSON.parse(jsonMatch[0]);
+                return embedding;
+              } catch (parseError) {
+                console.error('Error parsing embedding:', parseError);
+                // Return a mock embedding if parsing fails
+                return Array(384).fill(0).map(() => Math.random() * 2 - 1);
+              }
+            }
+          }
+          
+          // If no valid embedding found, return a mock embedding
+          console.warn('No valid embedding found in executive response, using mock embedding');
+          return Array(384).fill(0).map(() => Math.random() * 2 - 1);
+        } catch (error) {
+          console.error('Error generating embedding:', error);
+          // Return a mock embedding if the executive service fails
+          return Array(384).fill(0).map(() => Math.random() * 2 - 1);
+        }
+      })
     );
     
     // Format response in OpenAI-compatible format
@@ -569,9 +339,7 @@ async function handleChatRequest(messages, options, req, res) {
       tool_choice,
       response_format,
       include_executive_thinking = false, // Extract the new parameter
-      executivePromise: initialExecutivePromise,
-      extended_thread_id = null, // Extract the thread ID for extended mode
-      isExtendedMode = false // Extract the extended mode flag
+      executivePromise: initialExecutivePromise
     } = options;
     
     // Create a mutable variable for the executive promise
@@ -680,11 +448,6 @@ async function handleChatRequest(messages, options, req, res) {
             : String(userMessageContent || '');
         
         let debugContent = `[DEBUG] User Query: ${userQuery}\n\n`;
-        
-        // Add information about executive-first flow if applicable
-        if (isExtendedMode && isExecutiveFirst) {
-          debugContent += `[DEBUG] Using executive-first flow with response plan\n\n`;
-        }
             
         const debugQueryEvent = {
           id: `debug-${Date.now()}`,
@@ -725,9 +488,6 @@ async function handleChatRequest(messages, options, req, res) {
             if (isJsonStreaming) {
               jsonCollectedContent += chunk.content;
             }
-            
-            // We accumulate the speaker's output but don't send non-blocking updates
-            // The executive will receive the full output when it's checked for interruption
           }
           
           // Format the chunk as an OpenAI-compatible event
@@ -815,36 +575,6 @@ async function handleChatRequest(messages, options, req, res) {
                 console.log(`[EXECUTIVE_THINKING] Sent executive reasoning: "${reason.substring(0, 100)}..."`);
               }
               
-              // Store the knowledge document in the vector store if it's not empty
-              if (knowledge_document && knowledge_document.trim() !== 'No additional information' &&
-                  knowledge_document.trim() !== '' && chromaCollection) {
-                try {
-                  const id = `knowledge-${Date.now()}`;
-                  const timestamp = new Date().toISOString();
-                  const originalQuery = typeof messages[messages.length - 1].content === 'string'
-                    ? messages[messages.length - 1].content
-                    : JSON.stringify(messages[messages.length - 1].content);
-                  
-                  console.log(`[VECTOR_STORE] Storing knowledge document in ChromaDB with ID: ${id}`);
-                  console.log(`[VECTOR_STORE] Knowledge document length: ${knowledge_document.length} characters`);
-                  
-                  // Store in ChromaDB using the built-in embedding function
-                  await chromaCollection.add({
-                    ids: [id],
-                    documents: [knowledge_document],
-                    metadatas: [{
-                      query: originalQuery,
-                      timestamp: timestamp,
-                      source: 'executive-knowledge'
-                    }]
-                  });
-                  
-                  console.log(`[VECTOR_STORE] Successfully stored knowledge document in ChromaDB at ${timestamp}`);
-                } catch (error) {
-                  console.warn('[VECTOR_STORE] Error storing knowledge document in vector store:', error.message);
-                }
-              }
-              
               if (action === 'interrupt') {
                 isInterrupted = true;
                 hasExecutiveInterrupted = true; // Mark that the executive has interrupted
@@ -872,173 +602,6 @@ async function handleChatRequest(messages, options, req, res) {
                 
                 // Continue with the speaker after interruption
                 isInterrupted = false;
-              } else if (action === 'restart') {
-                // For restart, we'll stop the current stream and start a new one
-                // with the knowledge document included
-                isInterrupted = true;
-                hasExecutiveInterrupted = true; // Mark that the executive has interrupted
-                
-                // Send a message indicating the restart
-                const restartContent = DEBUG
-                  ? `\n\n[DEBUG] Executive Restart:\n${JSON.stringify(executiveResult.data)}\n\n[Executive restarting with updated information]`
-                  : `\n\n[Executive restarting with updated information]`;
-                
-                const restartEvent = {
-                  id: `exec-restart-${Date.now()}`,
-                  object: 'chat.completion.chunk',
-                  created: Math.floor(Date.now() / 1000),
-                  model: MODEL,
-                  choices: [{
-                    index: 0,
-                    delta: {
-                      content: restartContent
-                    },
-                    finish_reason: null
-                  }]
-                };
-                
-                res.write(`data: ${JSON.stringify(restartEvent)}\n\n`);
-                
-                // Create a new set of messages with the knowledge document
-                const updatedMessages = [...messages];
-                
-                // Add the knowledge document as a system message
-                updatedMessages.splice(updatedMessages.length - 1, 0, {
-                  role: 'system',
-                  content: `Updated information: ${knowledge_document}`
-                });
-                
-                // Convert to LangChain format
-                const updatedLangchainMessages = [];
-                for (const msg of updatedMessages) {
-                  // Ensure content is properly formatted for LangChain
-                  let content = msg.content;
-                  
-                  // If content is null or undefined, set it to empty string
-                  if (content === null || content === undefined) {
-                    content = '';
-                  }
-                  
-                  // If content is an array (multimodal content), convert to string for now
-                  if (Array.isArray(content)) {
-                    // Extract text parts from the content array
-                    const textParts = content
-                      .filter(part => part.type === 'text')
-                      .map(part => part.text)
-                      .join('\n');
-                    
-                    content = textParts || JSON.stringify(content);
-                  }
-                  
-                  // Create appropriate message type
-                  if (msg.role === 'user') {
-                    updatedLangchainMessages.push(new HumanMessage(content));
-                  } else if (msg.role === 'assistant') {
-                    updatedLangchainMessages.push(new AIMessage(content));
-                  } else if (msg.role === 'system') {
-                    updatedLangchainMessages.push(new SystemMessage(content));
-                  } else {
-                    updatedLangchainMessages.push(new HumanMessage(content));
-                  }
-                }
-                
-                // Send a separator to indicate the start of the new response
-                const separatorEvent = {
-                  id: `separator-${Date.now()}`,
-                  object: 'chat.completion.chunk',
-                  created: Math.floor(Date.now() / 1000),
-                  model: MODEL,
-                  choices: [{
-                    index: 0,
-                    delta: {
-                      content: '\n\n'
-                    },
-                    finish_reason: null
-                  }]
-                };
-                
-                res.write(`data: ${JSON.stringify(separatorEvent)}\n\n`);
-                
-                try {
-                  // Start a new stream with the updated messages
-                  const newLlmStream = await configuredLLM.stream(updatedLangchainMessages);
-                  
-                  // Reset tracking variables
-                  speakerOutput = '';
-                  isInterrupted = false;
-                  if (isJsonStreaming) {
-                    jsonCollectedContent = '';
-                  }
-                  
-                  // Process each chunk from the new stream
-                  for await (const chunk of newLlmStream) {
-                    // Accumulate the speaker's output
-                    if (chunk.content) {
-                      speakerOutput += chunk.content;
-                      
-                      // For JSON mode, collect all content
-                      if (isJsonStreaming) {
-                        jsonCollectedContent += chunk.content;
-                      }
-                    }
-                    
-                    // Format the chunk as an OpenAI-compatible event
-                    const chunkEvent = {
-                      id: responseId,
-                      object: 'chat.completion.chunk',
-                      created: startTime,
-                      model: MODEL,
-                      choices: [{
-                        index: 0,
-                        delta: {},
-                        finish_reason: null
-                      }]
-                    };
-                    
-                    // Add content if present and not in JSON mode
-                    if (chunk.content && !isJsonStreaming) {
-                      chunkEvent.choices[0].delta.content = chunk.content;
-                    }
-                    
-                    // Add tool call chunks if present
-                    if (chunk.tool_call_chunks && chunk.tool_call_chunks.length > 0) {
-                      chunkEvent.choices[0].delta.tool_calls = chunk.tool_call_chunks.map(toolCall => ({
-                        index: toolCall.index,
-                        id: toolCall.id,
-                        type: 'function',
-                        function: {
-                          name: toolCall.name,
-                          arguments: toolCall.args
-                        }
-                      }));
-                    }
-                    
-                    // Send the chunk to the client
-                    res.write(`data: ${JSON.stringify(chunkEvent)}\n\n`);
-                  }
-                } catch (error) {
-                  console.error('Error in restarted stream:', error);
-                  
-                  // Send an error event
-                  const errorEvent = {
-                    id: `error-${Date.now()}`,
-                    object: 'chat.completion.chunk',
-                    created: Math.floor(Date.now() / 1000),
-                    model: MODEL,
-                    choices: [{
-                      index: 0,
-                      delta: {
-                        content: `\n\nError in restarted response: ${error.message}`
-                      },
-                      finish_reason: null
-                    }]
-                  };
-                  
-                  res.write(`data: ${JSON.stringify(errorEvent)}\n\n`);
-                }
-                
-                // Break out of the original streaming loop
-                break;
               }
             }
           }
@@ -1074,36 +637,6 @@ async function handleChatRequest(messages, options, req, res) {
               
               res.write(`data: ${JSON.stringify(thinkingEvent)}\n\n`);
               console.log(`[EXECUTIVE_THINKING] Sent executive reasoning: "${reason.substring(0, 100)}..."`);
-            }
-            
-            // Store the knowledge document in the vector store if it's not empty
-            if (knowledge_document && knowledge_document.trim() !== 'No additional information' &&
-                knowledge_document.trim() !== '' && chromaCollection) {
-              try {
-                const id = `knowledge-${Date.now()}`;
-                const timestamp = new Date().toISOString();
-                const originalQuery = typeof messages[messages.length - 1].content === 'string'
-                  ? messages[messages.length - 1].content
-                  : JSON.stringify(messages[messages.length - 1].content);
-                
-                console.log(`[VECTOR_STORE] Storing knowledge document in ChromaDB with ID: ${id}`);
-                console.log(`[VECTOR_STORE] Knowledge document length: ${knowledge_document.length} characters`);
-                
-                // Store in ChromaDB using the built-in embedding function
-                await chromaCollection.add({
-                  ids: [id],
-                  documents: [knowledge_document],
-                  metadatas: [{
-                    query: originalQuery,
-                    timestamp: timestamp,
-                    source: 'executive-knowledge'
-                  }]
-                });
-                
-                console.log(`[VECTOR_STORE] Successfully stored knowledge document in ChromaDB at ${timestamp}`);
-              } catch (error) {
-                console.warn('[VECTOR_STORE] Error storing knowledge document in vector store:', error.message);
-              }
             }
             
             if (action === 'interrupt') {
@@ -1201,43 +734,6 @@ async function handleChatRequest(messages, options, req, res) {
         res.write(`data: ${JSON.stringify(finalEvent)}\n\n`);
         res.write('data: [DONE]\n\n');
         res.end();
-        
-        // Store the conversation in the vector store for future reference
-        try {
-          if (chromaCollection) {
-            const id = `stream-${Date.now()}`;
-            const timestamp = new Date().toISOString();
-            console.log(`[VECTOR_STORE] Storing streaming response in ChromaDB with ID: ${id}`);
-            console.log(`[VECTOR_STORE] Content length: ${speakerOutput.length} characters`);
-            
-            // Store in ChromaDB using the built-in embedding function
-            await chromaCollection.add({
-              ids: [id],
-              documents: [speakerOutput],
-              metadatas: [{
-                query: typeof messages[messages.length - 1].content === 'string'
-                  ? messages[messages.length - 1].content
-                  : JSON.stringify(messages[messages.length - 1].content),
-                timestamp: timestamp,
-                source: 'speaker-stream'
-              }]
-            });
-            
-            console.log(`[VECTOR_STORE] Successfully stored streaming response in ChromaDB at ${timestamp}`);
-          }
-        } catch (error) {
-          console.warn('[VECTOR_STORE] Error storing in vector store:', error.message);
-        }
-        
-        // Update the progress document in extended mode
-        if (isExtendedMode && extended_thread_id) {
-          try {
-            console.log(`[EXTENDED_MODE] Updating progress document for thread ${extended_thread_id} with streaming response`);
-            await extendedMode.updateProgressWithResponse(extended_thread_id, speakerOutput);
-          } catch (error) {
-            console.error(`[EXTENDED_MODE] Error updating progress document: ${error.message}`);
-          }
-        }
       } catch (error) {
         console.error('Error streaming response:', error);
         // Try to send an error event if possible
@@ -1328,12 +824,6 @@ async function handleChatRequest(messages, options, req, res) {
           
           // Add debug information
           let debugInfo = { query: userQuery };
-          
-          // Add information about executive-first flow if applicable
-          if (isExtendedMode && isExecutiveFirst) {
-            debugInfo.mode = "executive-first";
-            debugInfo.note = "Using executive response plan";
-          }
               
           // In JSON mode, we need to maintain valid JSON
           if (isJsonMode) {
@@ -1341,9 +831,6 @@ async function handleChatRequest(messages, options, req, res) {
             content = JSON.stringify(debugObj);
           } else {
             let debugContent = `[DEBUG] User Query: ${userQuery}\n\n`;
-            if (isExtendedMode && isExecutiveFirst) {
-              debugContent += `[DEBUG] Using executive-first flow with response plan\n\n`;
-            }
             content = `${debugContent}${content}`;
           }
         }
@@ -1396,36 +883,6 @@ async function handleChatRequest(messages, options, req, res) {
             console.log(`[EXECUTIVE_THINKING] Included executive reasoning in response: "${reason.substring(0, 100)}..."`);
           }
           
-          // Store the knowledge document in the vector store if it's not empty
-          if (knowledge_document && knowledge_document.trim() !== 'No additional information' &&
-              knowledge_document.trim() !== '' && chromaCollection) {
-            try {
-              const id = `knowledge-${Date.now()}`;
-              const timestamp = new Date().toISOString();
-              const originalQuery = typeof messages[messages.length - 1].content === 'string'
-                ? messages[messages.length - 1].content
-                : JSON.stringify(messages[messages.length - 1].content);
-              
-              console.log(`[VECTOR_STORE] Storing knowledge document in ChromaDB with ID: ${id}`);
-              console.log(`[VECTOR_STORE] Knowledge document length: ${knowledge_document.length} characters`);
-              
-              // Store in ChromaDB using the built-in embedding function
-              await chromaCollection.add({
-                ids: [id],
-                documents: [knowledge_document],
-                metadatas: [{
-                  query: originalQuery,
-                  timestamp: timestamp,
-                  source: 'executive-knowledge'
-                }]
-              });
-              
-              console.log(`[VECTOR_STORE] Successfully stored knowledge document in ChromaDB at ${timestamp}`);
-            } catch (error) {
-              console.warn('[VECTOR_STORE] Error storing knowledge document in vector store:', error.message);
-            }
-          }
-          
           if (action === 'interrupt') {
             // Add the interruption to the response
             const interruptionContent = DEBUG
@@ -1433,120 +890,6 @@ async function handleChatRequest(messages, options, req, res) {
               : `\n\n[Executive Interruption: ${knowledge_document}]`;
             
             formattedResponse.choices[0].message.content += interruptionContent;
-          } else if (action === 'restart') {
-            // Create a new response with the knowledge document
-            const updatedMessages = [...messages];
-            
-            // Add the knowledge document as a system message
-            updatedMessages.splice(updatedMessages.length - 1, 0, {
-              role: 'system',
-              content: `Updated information: ${knowledge_document}`
-            });
-            
-            // Convert to LangChain format
-            const updatedLangchainMessages = [];
-            for (const msg of updatedMessages) {
-              // Ensure content is properly formatted for LangChain
-              let content = msg.content;
-              
-              // If content is null or undefined, set it to empty string
-              if (content === null || content === undefined) {
-                content = '';
-              }
-              
-              // If content is an array (multimodal content), convert to string for now
-              if (Array.isArray(content)) {
-                // Extract text parts from the content array
-                const textParts = content
-                  .filter(part => part.type === 'text')
-                  .map(part => part.text)
-                  .join('\n');
-                
-                content = textParts || JSON.stringify(content);
-              }
-              
-              // Create appropriate message type
-              if (msg.role === 'user') {
-                updatedLangchainMessages.push(new HumanMessage(content));
-              } else if (msg.role === 'assistant') {
-                updatedLangchainMessages.push(new AIMessage(content));
-              } else if (msg.role === 'system') {
-                updatedLangchainMessages.push(new SystemMessage(content));
-              } else {
-                updatedLangchainMessages.push(new HumanMessage(content));
-              }
-            }
-            
-            // Get a new response
-            const newLlmResponse = await configuredLLM.invoke(updatedLangchainMessages);
-            
-            // Update the formatted response
-            let restartContent = newLlmResponse.content || '';
-            
-            // If debug mode is enabled, include the executive response data
-            if (DEBUG) {
-              restartContent = `[DEBUG] Executive Restart:\n${JSON.stringify(executiveResponse.data)}\n\n${restartContent}`;
-            }
-            
-            formattedResponse.choices[0].message.content = `[Executive restarted with updated information]\n\n${restartContent}`;
-            
-            // Update tool calls if present
-            if (newLlmResponse.tool_calls && newLlmResponse.tool_calls.length > 0) {
-              formattedResponse.choices[0].message.tool_calls = newLlmResponse.tool_calls.map((toolCall, index) => ({
-                id: toolCall.id || `call_${Date.now()}_${index}`,
-                type: 'function',
-                function: {
-                  name: toolCall.name,
-                  arguments: typeof toolCall.args === 'string' ? toolCall.args : JSON.stringify(toolCall.args)
-                }
-              }));
-              formattedResponse.choices[0].finish_reason = 'tool_calls';
-            }
-          }
-        }
-        
-        // Store the conversation in the vector store for future reference
-        try {
-          if (chromaCollection) {
-            let contentToStore = formattedResponse.choices[0].message.content || '';
-            
-            // If there are tool calls, include them in the stored content
-            if (formattedResponse.choices[0].message.tool_calls) {
-              contentToStore += '\n\nTool Calls: ' + JSON.stringify(formattedResponse.choices[0].message.tool_calls);
-            }
-            
-            const id = `nonstream-${Date.now()}`;
-            const timestamp = new Date().toISOString();
-            console.log(`[VECTOR_STORE] Storing non-streaming response in ChromaDB with ID: ${id}`);
-            console.log(`[VECTOR_STORE] Content length: ${contentToStore.length} characters`);
-            
-            // Store in ChromaDB using the built-in embedding function
-            await chromaCollection.add({
-              ids: [id],
-              documents: [contentToStore],
-              metadatas: [{
-                query: typeof messages[messages.length - 1].content === 'string'
-                  ? messages[messages.length - 1].content
-                  : JSON.stringify(messages[messages.length - 1].content),
-                timestamp: timestamp,
-                source: 'speaker-nonstream'
-              }]
-            });
-            
-            console.log(`[VECTOR_STORE] Successfully stored non-streaming response in ChromaDB at ${timestamp}`);
-          }
-        } catch (error) {
-          console.warn('[VECTOR_STORE] Error storing in vector store:', error.message);
-        }
-        
-        // Update the progress document in extended mode
-        if (isExtendedMode && extended_thread_id) {
-          try {
-            console.log(`[EXTENDED_MODE] Updating progress document for thread ${extended_thread_id} with non-streaming response`);
-            const responseContent = formattedResponse.choices[0].message.content || '';
-            await extendedMode.updateProgressWithResponse(extended_thread_id, responseContent);
-          } catch (error) {
-            console.error(`[EXTENDED_MODE] Error updating progress document: ${error.message}`);
           }
         }
         

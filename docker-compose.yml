@@ -15,27 +15,14 @@ services:
       - API_PORT=3000
       - SPEAKER_PORT=8002
       - EXECUTIVE_URL=http://executive:8001
-      - CHROMA_URL=http://chroma:8000
       - SPEAKER_MODEL=${SPEAKER_MODEL}
       - SPEAKER_MODEL_KWARGS=${SPEAKER_MODEL_KWARGS}
       - DEFAULT_API_KEY=${DEFAULT_API_KEY}
       - DEBUG=${DEBUG:-false}
-      # Extended mode configuration
-      - DATA_DIR=${DATA_DIR:-/data/extended}
-      - EXTENDED_MAX_CONTEXT_SIZE=${EXTENDED_MAX_CONTEXT_SIZE:-16000}
-      - EXTENDED_SUMMARIZATION_THRESHOLD=${EXTENDED_SUMMARIZATION_THRESHOLD:-0.7}
-      - EXTENDED_PRESERVE_MESSAGE_COUNT=${EXTENDED_PRESERVE_MESSAGE_COUNT:-4}
-      - EXTENDED_EXPIRATION_TIME=${EXTENDED_EXPIRATION_TIME:-86400000}
-      - EXTENDED_CLEANUP_INTERVAL=${EXTENDED_CLEANUP_INTERVAL:-3600000}
-      - EXTENDED_SUMMARY_MODEL=${EXTENDED_SUMMARY_MODEL:-openai:gpt-3.5-turbo}
-      - EXTENDED_SUMMARY_MODEL_KWARGS=${EXTENDED_SUMMARY_MODEL_KWARGS}
-    volumes:
-      - extended_data:/data/extended
     networks:
       - exlayernet
     depends_on:
       - executive
-      - chroma
 
   executive:
     build:
@@ -52,25 +39,25 @@ services:
       - NEO4J_URL=bolt://neo4j:7687  # This is the internal container port, which remains unchanged
       - NEO4J_USER=${NEO4J_USER}
       - NEO4J_PASSWORD=${NEO4J_PASSWORD}
+      - EMBEDDING_MODEL=sentence-transformers/all-MiniLM-L6-v2
+      - EMBEDDING_DIMENSION=384  # all-MiniLM-L6-v2 produces 384-dimensional embeddings
+      - DEBUG=true  # Enable debug mode for the executive service
     networks:
       - exlayernet
     depends_on:
       neo4j:
         condition: service_healthy
 
-  chroma:
-    image: chromadb/chroma
-    volumes:
-      - chroma_data:/chroma/chroma
-    ports:
-      - "8000:8000"  # Chroma API
-    networks:
-      - exlayernet
-
   neo4j:
-    image: neo4j:2025.02.0
+    image: neo4j:5.26.4  # Updated to a version that supports vector indexes
     environment:
       - NEO4J_AUTH=${NEO4J_USER}/${NEO4J_PASSWORD}
+      - NEO4J_dbms_memory_heap_initial__size=512m
+      - NEO4J_dbms_memory_heap_max__size=2G
+      - NEO4J_dbms_memory_pagecache_size=512m
+      # Enable vector index support
+      - NEO4J_dbms_security_procedures_unrestricted=gds.*,apoc.*,vectorize.*,vector.*
+      - NEO4J_dbms_security_procedures_allowlist=gds.*,apoc.*,vectorize.*,vector.*
     ports:
       - "7475:7474"  # HTTP - changed from 7474 to avoid conflicts
       - "7688:7687"  # Bolt - changed from 7687 to avoid conflicts
@@ -91,5 +78,3 @@ networks:
 
 volumes:
   neo4j_data:
-  chroma_data:
-  extended_data:  # Volume for extended mode data

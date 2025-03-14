@@ -23,9 +23,9 @@ help:
 	@echo "  make logs          - View logs from all services"
 	@echo "  make test          - Run the test script"
 	@echo "  make test-vector   - Run vector store integration test"
+	@echo "  make test-vector-search - Run vector search capabilities test"
 	@echo "  make test-exec     - Run knowledge graph integration test"
 	@echo "  make test-interaction - Run speaker-executive interaction test"
-	@echo "  make test-extended - Run extended mode test"
 	@echo "  make clean         - Remove containers and volumes"
 	@echo "  make build         - Build all Docker images"
 	@echo "  make status        - Check the status of all services"
@@ -59,7 +59,7 @@ restart:
 .PHONY: redeploy
 redeploy:
 	@echo "Redeploying all services..."
-	$(DOCKER_COMPOSE) down
+	$(DOCKER_COMPOSE) down --volumes
 	$(DOCKER_COMPOSE) up -d --build
 	@echo "Services are running. API available at http://localhost:3000"
 	@echo "Run 'make logs' to view logs"
@@ -79,15 +79,15 @@ test:
 	fi
 	node test_api.js
 
-# Run the vector store integration test
-.PHONY: test-vector
-test-vector:
-	@echo "Running vector store integration test..."
+# Run the vector search capabilities test
+.PHONY: test-vector-search
+test-vector-search:
+	@echo "Running vector search capabilities test..."
 	@if [ ! -d "node_modules" ]; then \
 		echo "Installing dependencies..."; \
 		npm install; \
 	fi
-	node test_vector_store.js
+	node test_vector_search.js
 
 # Run the vector store integration test
 .PHONY: test-exec
@@ -107,16 +107,6 @@ test-interaction:
 		npm install; \
 	fi
 	node test_executive_interaction.js
-
-# Run the extended mode test
-.PHONY: test-extended
-test-extended:
-	@echo "Running extended mode test..."
-	@if [ ! -d "node_modules" ]; then \
-		echo "Installing dependencies..."; \
-		npm install; \
-	fi
-	node test_extended_mode.js
 
 # Remove containers and volumes
 .PHONY: clean
@@ -151,14 +141,10 @@ dev:
 		echo "Installing dependencies..."; \
 		npm install; \
 	fi
-	@echo "Starting Vector Store service..."
-	node src/vector_store/server.js &
 	@echo "Starting Executive service..."
 	node src/executive/server.js &
 	@echo "Starting Speaker service..."
 	node src/speaker/server.js &
-	@echo "Starting API service..."
-	node src/api/server.js &
 	@echo "All services started. API available at http://localhost:3000"
 	@echo "Press Ctrl+C to stop all services"
 	@wait
@@ -184,16 +170,13 @@ chatbot:
 	$(PYTHON) chatbot.py
 
 # Individual service logs
-.PHONY: logs-speaker logs-executive logs-vector-store logs-neo4j
+.PHONY: logs-speaker logs-executive logs-neo4j
 
 logs-speaker:
 	$(DOCKER_COMPOSE) logs -f speaker
 
 logs-executive:
 	$(DOCKER_COMPOSE) logs -f executive
-
-logs-vector-store:
-	$(DOCKER_COMPOSE) logs -f chroma
 
 logs-neo4j:
 	$(DOCKER_COMPOSE) logs -f neo4j

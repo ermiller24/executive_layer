@@ -2,96 +2,45 @@ Executive Layer design document
 
 # CONCEPT
 
-The Executive Layer, or ExL, is going to be an operability layer that lives on top of an arbitray llm. It exists to provide executive thinking, course correction, contextual knowledge, and advanced planning and reasoning capabilities. At the same time it should act as a drop-in replacement for any LLM model, implementing an OpenAI-compatible API. In theory users should be able to set their environment variables for the configuration and otherwise not have to worry.
+The Executive Layer, or ExL, is an operability layer that lives on top of an arbitrary LLM. It exists to provide executive thinking, course correction, contextual knowledge, and advanced planning and reasoning capabilities. At the same time it should act as a drop-in replacement for any LLM model, implementing an OpenAI-compatible API. In theory users should be able to set their environment variables for the configuration and otherwise not have to worry.
 
-The ExL operates by running two LLM instances simultaneously, which we'll refer to as layers. The first layer is the "speaker". It is the forward-facing model that the user interacts with, providing chat, tool calls, etc. The second LLM is the actual "executive" layer. This layer provides support for the speaker. Also included in the ExL will be a knowledge graph implemented in Neo4j (for now) and a vector store database.
+The ExL operates by running two LLM instances simultaneously, which we'll refer to as layers. The first layer is the "speaker". It is the forward-facing model that the user interacts with, providing chat, tool calls, etc. The second LLM is the actual "executive" layer. This layer provides support for the speaker. Also included in the ExL will be a knowledge graph implemented in Neo4j, which will incorporate vector embeddings for semantic search capabilities.
 
 
 # FLOW
-The basic flow of the ExL will be as follows. The user prompts the system using an OpenAI-compatible endpoint. The prompt is first passed to the vector store, and relevant context is retrieved if any is available. This context along with the user's prompt and a system prompt are fed into the LLM, and it begins streaming back results. These are immediately streamed back out to the user, so from their point of view the process is no slower than any normal LLM call.
 
-At the same time, the executive layer takes the user's query and begins searching its knowledge graph for relevant information. This information is compiled into a "knowledge document". At this point it is likely that the speaker is still speaking, so the executive takes the user's prompt plus the information it has gathered from the knowledge graph and verifies that the speaker is on the right track. There are a couple of possibilities here:
+The basic flow of the ExL will be as follows. The user prompts the system using an OpenAI-compatible endpoint. The prompt is passed to the speaker LLM along with a system prompt, and it begins streaming back results. These are immediately streamed back out to the user, so from their point of view the process is no slower than any normal LLM call.
 
-1. The speaker is making good progress and not making mistakes. The executive layer decides not to interrupt. Meanwhile, the knowledge document put together by the executive is entered into the vector store if the embedding of the user prompt is sufficiently "new". Subsequent calls to the speaker with substantially similar prompts will be able to retrieve the compiled document and include it in the initial prompt, providing a speed-up as the system learns.
-2. The speaker is making good progress but has made some errors or gotten slightly off track, but the context it got from the vector store is good. The executive prompts the speaker with the original query and any insights in order to get the speaker back on track, but doesn't significantly interfere. If the embedding of the user prompt is sufficiently new, the knowledge document is entered into the vector store.
-3. The speaker is making progress but is making errors because the initial context was incorrect or not applicable. The executive interrupts the speaker with the new knowledge document, but lets it continue. The new knowledge document is entered into the vector store. If the context from the vector store is objectively wrong or misleading, it is deleted, otherwise it is kept.
-4. The speaker is substantially wrong or has seriously deviated from its task. The executive stops the speaker and restarts it from the beginning, with the new knowledge document and updated instructions. The vector store is updated as usual.
+At the same time, the executive layer takes the user's query and begins monitoring the speaker's output. The executive has access to the knowledge graph and can search it for relevant information using both semantic (vector-based) and structured queries. If the executive determines that the speaker needs additional information or correction, it can interrupt the speaker with relevant information.
 
-Now the executive does another pass looking at the knowledge graph. It makes updates to the graph as necessary based on information learned from the conversation. Then it does another evaluation pass at the speaker's output to verify that the speaker is on the right track, and the cycle continues.
+There are several possible scenarios:
+
+1. The speaker is making good progress and not making mistakes. The executive layer decides not to interrupt. Meanwhile, the executive may update the knowledge graph with new information learned from the conversation if appropriate.
+
+2. The speaker is making good progress but has made some errors or gotten slightly off track. The executive interrupts the speaker with the original query and any insights in order to get the speaker back on track. The speaker then continues with this new information, correcting itself in real-time.
+
+3. The speaker is making progress but is making errors because it lacks important information. The executive interrupts the speaker with a knowledge document compiled from the knowledge graph. The speaker then continues with this new information, incorporating it into its ongoing response.
+
+The executive continues to monitor the speaker's output and make updates to the knowledge graph as necessary based on information learned from the conversation. This cycle continues throughout the interaction.
 
 From the user's perspective, it looks as if the system is simply streaming LLM thoughts. All of this interaction is invisible to them. They simply see an LLM that has better knowledge, learns in real time, and can course-correct as necessary.
 
 
 # IMPLEMENTATION
 
-Langchain's integrations already allow it to access a wide variety of LLM models through their respective python APIs and return a standard Runnable object that include batch, streaming, etc. The first thing to implement is essentially a bridge layer docker container that uses langchain Runnable objects to replicate the OpenAI API as close as possible. Features that aren't built into the langchain integration can either be disabled or be simply passed straight through to the original API while presenting a warning to the user. That's something we need to decide on.
+Langchain's integrations already allow it to access a wide variety of LLM models through their respective python APIs and return a standard Runnable object that include batch, streaming, etc. The first thing to implement is essentially a bridge layer docker container that uses langchain Runnable objects to replicate the OpenAI API as close as possible. Features that aren't built into the langchain integration can either be disabled or be simply passed straight through to the original API while presenting a warning to the user.
 
-Once we have that implemented, we need to implement the executive LLM. The executive runs in parallel with the speaker and has an "interrupt" tool and a "restart" tool. If the executive calls for interrupt, the executive's interruption is passed through to the user and then the speaker resumes with its work and the new information. If the executive calls to restart, a message is passed through to the user that the LLM is restarting its though process and then the speaker starts streaming again from the beginning. It is transparent to the user when the executive interrupts if they understand the underlying architecture, but in practice they still just keep receiving streaming chunks.
+Once we have that implemented, we need to implement the executive LLM. The executive runs in parallel with the speaker and has an "interrupt" tool. If the executive calls for interrupt, the executive's interruption is passed through to the user and then the speaker resumes with its work and the new information. It is transparent to the user when the executive interrupts if they understand the underlying architecture, but in practice they still just keep receiving streaming chunks.
 
-Then we implement the Neo4J knowledge graph. An implementation of this already exists in my work/chatbot/ directory, it can essentially be copied into the new ExL codebase. Only the executive has access to this system, and it is responsible for both querying it and managing it. Test to make sure that the speaker can be given a bad prompt and have it corrected by the knowledge in the knowledge graph by giving the speaker a fake prompt with bad data and loading the correct data into the knowledge graph, and then run and tweak prompts until the executive is properly correcting the speaker. Test with both "slightly wrong" prompts to focus on interruptions and "severely wrong" prompts for restarts.
+Then we implement the Neo4J knowledge graph with vector embeddings. We'll leverage Neo4j's vector capabilities to enable semantic search within the structured knowledge graph. This will allow the speaker to efficiently query the knowledge graph using both semantic similarity and explicit relationships. The executive will be responsible for maintaining and organizing this knowledge graph, ensuring that information is properly structured and accessible.
 
-Then we implement the vector store. In theory the vector store should almost be self-managing, as we are just inserting the knowledge documents generated by the executive with the user prompt as the key as long as the prompt embedding lies sufficiently far from the retrieved embedding. The executive may need to have some ability to forcibly discard information from the vector store in case the information is really bad. The vector store is accessed immediately upon getting the prompt, and its response is included directly in the speaker's system prompt.
+For the speaker, we'll implement tool calls that allow it to directly query the knowledge graph. These tools will enable the speaker to search for information based on semantic similarity, explicit relationships, or a combination of both. This approach eliminates the need for a separate vector store and provides a more unified and efficient knowledge retrieval system.
+
+We'll also implement functionality for the executive to compile project plans into the knowledge graph when a large project is initiated. This will ensure that when a user returns to work on a project, the speaker has immediate access to existing design and progress information. This approach allows for project continuity without requiring special modes or context window management, as the relevant information is stored in a structured format within the knowledge graph.
 
 
 # EXTENSIONS
 
 ## External Knowledge Infrastructure
 
-Externally hosting both the knowledge graph and the vector store. This would allow multiple instances to be running while all sharing the same knowledge base and learning in real time. As the size of the system grows we have to worry that too many systems might make the knowledge graph too muddy, and so we implement separate knowledge graph managers from the executive layers. This is more of an enterprise-grade problem, so we don't need to do this unless we get good traction.
-
-## Extended Response Mode
-
-The Extended Response Mode is designed to handle long-running conversations that may exceed context window limitations. This mode enables the system to maintain conversation history across multiple requests without requiring the client to send the full history each time.
-
-### Key Features:
-
-1. **Thread Tracking**: The system tracks conversations by a user-provided `extended_thread_id`, which can be any string. This allows the system to maintain conversation state between requests.
-
-2. **Incremental Updates**: Users only need to send new messages in each request, as the system maintains the full conversation history internally.
-
-3. **Executive-First Flow**:
-   - Unlike regular mode where the speaker starts responding immediately, in extended mode the executive creates a detailed response plan first.
-   - Only after the plan is created does the speaker begin responding, following the executive's guidance.
-   - This ensures coherence and structure in long, complex responses.
-
-4. **Dynamic Context Management**:
-   - When responses approach the context window limit, the executive layer automatically generates a summary of earlier conversation history.
-   - The summary replaces older messages in the context window, while keeping the most recent messages intact to maintain conversational coherence.
-   - This allows for indefinitely long conversations without context overflow.
-
-5. **Progress Tracking**:
-   - The executive layer maintains a text file documenting the response plan and tracking progress.
-   - The progress document serves as both a planning tool and a reference for the executive.
-   - When the executive's own responses become lengthy, it can replace portions of its message history with references to the progress document.
-   - This ensures the executive layer can maintain its reasoning capabilities even in extended conversations.
-
-6. **Vector Store Optimization**:
-   - Vector store recall is disabled in extended mode.
-   - This is based on the assumption that extended mode will involve many knowledge documents and interruptions with potentially long response times, making vector store recall unnecessary for performance optimization.
-
-### Implementation Flow:
-
-1. User sends a request with an `extended_thread_id`
-2. System creates or retrieves the thread
-3. For new threads:
-   - Executive creates a detailed response plan
-   - Progress document is created with the plan
-   - Speaker begins responding based on the plan
-4. For existing threads:
-   - System retrieves the thread history and progress document
-   - Executive updates the plan if needed
-   - Speaker continues responding based on the updated plan
-5. Throughout the conversation:
-   - Executive monitors the speaker's output
-   - Executive can interrupt with additional information
-   - Executive updates the progress document
-   - Context is managed dynamically to prevent overflow
-
-The extended response mode is activated by adding an `extended_thread_id` key to the POST request. Since this is an extension of the OpenAI API and not part of the standard specification, it won't accidentally activate during normal API usage.
-
-### Example Use Cases:
-
-- Long-form content creation (stories, articles, reports)
-- Complex problem-solving that requires multiple steps
-- Educational content that builds on previous explanations
-- Research projects that evolve over multiple sessions
+Externally hosting the knowledge graph. This would allow multiple instances to be running while all sharing the same knowledge base and learning in real time. As the size of the system grows we have to worry that too many systems might make the knowledge graph too muddy, and so we implement separate knowledge graph managers from the executive layers. This is more of an enterprise-grade problem, so we don't need to do this unless we get good traction.

@@ -1,450 +1,155 @@
-# Executive Layer (ExL) - Progress Log
+## 2025-03-12 (Night)
+- Architectural redesign:
+  - Updated design document to reflect a simplified architecture
+  - Integrated vector embeddings directly into Neo4j knowledge graph
+  - Removed separate vector store component
+  - Clarified roles of speaker and executive components
+  - Enhanced knowledge graph capabilities with semantic search
+  - Removed Extended Response Mode
 
-## 2025-03-05
-- Analyzed design document and understood project requirements
-- Created basic project structure
-- Created docker-compose.yml with services for:
-  - API (OpenAI-compatible bridge)
-  - Speaker LLM
-  - Executive LLM
-  - Vector Store
-  - Neo4j (knowledge graph)
-- Implemented core components:
-  - OpenAI-compatible API bridge (server.js, chat.js, embedding.js)
-  - Speaker LLM service
-  - Executive LLM service with knowledge graph integration
-  - Vector Store service
-- Added support for critical OpenAI API features:
-  - Tool calling (both streaming and non-streaming)
-  - Structured JSON output (response_format parameter)
-  - Streaming (already implemented)
-- Created Dockerfiles for all services
-- Created test script (test_api.js) to verify API functionality, including tests for:
-  - Basic chat completions
-  - Embeddings
-  - Streaming
-  - Tool calling
-  - Streaming tool calling
-  - JSON mode
-- Created comprehensive README.md with documentation and instructions
-- Added Makefile with common commands for easier deployment and management:
-  - make deploy - Build and start all services
-  - make stop - Stop all services
-  - make restart - Restart all services
-  - make logs - View logs from all services
-  - make test - Run the test script
-  - make clean - Remove containers and volumes
-  - make build - Build all Docker images
-  - make status - Check the status of all services
-  - make install - Install Node.js dependencies
-  - make dev - Start services in development mode
-- Implemented Python chatbot for easy testing and demonstration:
-  - Uses Langchain to connect to the ExL system
-  - Supports both langchain-openai and openlm integrations
-  - Provides a simple command-line interface
-  - Streams responses in real-time
-  - Added make commands for Python environment setup and chatbot execution
-- Updated Speaker and Executive services to use initChatModel:
-  - Replaced direct ChatOpenAI instantiation with initChatModel
-  - Added support for different model providers (not just OpenAI)
-  - Updated environment variables to include model provider and API base options
-  - Updated docker-compose.yml to pass the new environment variables
-- Refactored Neo4j implementation to align with reference implementation:
-  - Created Neo4jManager class in knowledge/neo4j-manager.js
-  - Exposed Neo4j functionality as tool calls in knowledge/knowledge-tools.js
-  - Updated executive service to use knowledge tools instead of direct Neo4j interactions
-  - Bound knowledge tools to the LLM for direct interaction with the knowledge graph
-  - Implemented proper schema initialization for Neo4j
-  - Added support for creating nodes, edges, altering nodes, and searching the graph
-- Implemented credential management system:
-  - Added support for loading default credentials from environment variables
-  - Added ability to override credentials at runtime via API headers
-  - Updated API server to pass credentials to Speaker and Executive services
-  - Updated Vector Store service to accept API keys for embedding generation
-  - Updated Python chatbot to support command-line arguments for credential overrides
-  - Added clear documentation of credential options in README.md
+### New Architecture Implementation Plan:
 
-### Next Steps:
-1. ✅ Test the API bridge individually
-2. ✅ Test the Speaker LLM service (with mock responses)
-3. ✅ Test the Executive LLM service (with mock responses)
-4. ✅ Test the Vector Store service
-5. ✅ Test the integrated system (with mock functionality)
-6. ✅ Add error handling and logging
-7. ✅ Simplify architecture by removing the API service
-8. ✅ Implement proper streaming in the speaker service
-9. ✅ Improve environment variable handling
-10.✅ Enhance executive integration
-11.✅ Restore actual LLM functionality:
-    - Fix the message format conversion in the Speaker service
-    - Properly integrate with the LangChain ChatOpenAI class
-    - Ensure proper error handling for actual LLM calls
-12.✅ Enhance tool calling functionality:
-    - Test streaming tool calling with real LLMs
-    - Improve tool call processing in streaming mode
-13.✅ Implement JSON mode properly
-14.✅ Fix speaker-executive interaction:
-    - Update speaker to send its output to the executive
-    - Update executive to evaluate the speaker's output
-    - Add debug endpoint for direct executive access
-    - Create comprehensive testing for the interaction
-15. Optimize performance
-16. Add comprehensive logging
-17. Add monitoring and health checks
+#### Phase 1: Neo4j Vector Integration
+1. Update Neo4j configuration:
+   - Configure Neo4j to support vector embeddings
+   - Set up vector indexes for efficient similarity search
+   - Update Neo4j Docker image to latest version with vector support
+   ✅ Completed: Updated docker-compose.yml with Neo4j 5.13.0 and vector configuration
 
-### Future Enhancements:
-1. Add support for file processing and vision capabilities:
-   - Update API bridge to handle file uploads and attachments in chat completions
-   - Modify Speaker service to process files if the backend LLM supports it
-   - Update streaming implementation to handle file-related responses
-   - Add file handling to the Python chatbot
-2. Implement the remaining extensions mentioned in the design document:
-   - Managed Docker instance for sandboxed computations
-   - Different models for Speaker and Executive
-   - Multiple Executive models running simultaneously
-   
-### Completed Enhancements:
-1. ✅ Extended Response Mode:
-   - Implemented thread tracking for maintaining conversation history
-   - Added executive-first flow for structured responses
-   - Created dynamic context management with summarization
-   - Added progress tracking for long-running conversations
+2. Modify Neo4jManager:
+   - Add methods for creating and updating vector embeddings
+   - Implement k-nearest-neighbor search functionality
+   - Create hybrid query methods that combine semantic and structural search
+   - Update schema initialization to include vector properties
+   ✅ Completed: Updated Neo4jManager.js with vector embedding support
 
-### Notes:
-- The implementation follows the design document's flow
-- The Executive LLM can interrupt or restart the Speaker LLM based on its evaluation
-- The Vector Store provides context for the Speaker LLM
-- The Neo4j knowledge graph provides information for the Executive LLM
-- All components are packaged behind an OpenAI-compatible API
-- No extensions have been implemented as decisions are still pending
-- The API supports all critical OpenAI features: tool calling, JSON mode, and streaming
-- The Makefile makes it easy to deploy and manage the system with simple commands
-- The Python chatbot provides an easy way to test and demonstrate the system
-- File processing and vision capabilities are not currently implemented
-- The system now supports different model providers through initChatModel
-- The Neo4j knowledge graph is now implemented as tool calls bound to the LLM
-- The Executive LLM can now directly interact with the knowledge graph through tool calls
-- The knowledge graph structure follows the reference implementation
-- The credential management system allows for flexible deployment scenarios:
-  - Default credentials can be set in the .env file for easy deployment
-  - Credentials can be overridden at runtime for testing different models/providers
-  - The Python chatbot supports command-line arguments for credential overrides
-- Current implementation status:
-  - The system currently uses mock responses instead of actual LLM calls
-  - Embeddings endpoint works structurally but returns mock data
-  - Chat completions return static hardcoded responses
-  - Error handling has been improved but could be enhanced further
-  - The system passes basic tests but does not provide actual LLM functionality
-  - The Neo4j database is now accessible on non-standard ports to avoid conflicts
-  - All Docker containers have the necessary dependencies for native module compilation
-  - The "redeploy" make target simplifies the development workflow
+#### Phase 2: Knowledge Graph Enhancement
+3. Enhance knowledge tools:
+   - Create new tool calls for semantic search in the knowledge graph
+   - Implement tools for hybrid queries (combining vector similarity with graph relationships)
+   - Add tools for automatic knowledge organization and restructuring
+   - Update existing tools to work with the new vector-enhanced schema
+   ✅ Completed: Updated knowledge-tools.js with vector search capabilities
 
-### Testing Instructions:
-1. Set up environment variables in .env file
-2. Run `make deploy` to build and start all services
-3. Run `make test` to verify API functionality
-4. Run `make chatbot` to start the Python chatbot for interactive testing
-5. Test with real OpenAI API clients by pointing them to http://localhost:3000
-6. Use `make logs` to view logs from all services
-7. Use `make stop` to stop all services when done
+4. Implement project planning tools:
+   - Create tools for the executive to compile project plans
+   - Add methods to store design and progress information
+   - Implement retrieval methods for project continuity
+   - Create tools for updating project status and progress
 
-## 2025-03-06
-- Fixed dependency issues:
-  - Removed non-existent "langchain_pinecone" package that was causing build failures
-  - Updated LangChain imports to use the new package structure (@langchain/pinecone, @langchain/openai)
-  - Fixed import paths in both executive and speaker services
-- Improved error handling in all services:
-  - Added proper error handling for streaming responses in the speaker service
-  - Added checks to prevent "headers already sent" errors
-  - Added fallback mechanisms for when LLM initialization fails
-  - Added input validation for API requests
-- Enhanced the test suite:
-  - Modified test_api.js to handle circular references in streaming responses
-  - Added ability to skip problematic tests while focusing on core functionality
-  - Improved error reporting in test output
-- Added a "redeploy" make target for easier development:
-  - Combines down, build, and up commands into a single command
-  - Makes it faster to apply changes and restart the system
-- Fixed Neo4j port conflicts:
-  - Changed external port mappings to avoid conflicts with existing Neo4j instances
-  - HTTP port: 7474 → 7475
-  - Bolt port: 7687 → 7688
-- Added Python dependencies to Dockerfiles:
-  - Installed Python 3 and build tools in all service containers
-  - Set PYTHON environment variable to help node-gyp find Python
-  - Fixed issues with native module compilation during npm install
+#### Phase 3: Speaker-Knowledge Integration
+5. Update speaker service:
+   - Remove ChromaDB integration
+   - Add direct knowledge graph query capabilities
+   - Implement tool calls for the speaker to access the knowledge graph
+   - Create efficient query patterns for common knowledge retrieval scenarios
+   ✅ Completed: Updated speaker service to use the knowledge graph directly
 
-## 2025-03-06 (Afternoon)
-- Simplified architecture by removing the API service:
-  - Made the speaker service the front-facing API
-  - Moved OpenAI-compatible endpoints to the speaker service
-  - Updated docker-compose.yml to reflect the new architecture
-  - Updated Dockerfile.speaker to expose port 3000 instead of 8000
-  - Removed unnecessary API service files and configuration
-- Implemented proper streaming in the speaker service:
-  - Used LangChain's streaming API with configuredLLM.stream()
-  - Properly mapped LangChain streaming chunks to OpenAI API format
-  - Added support for tool call chunks in streaming responses
-  - Implemented executive integration in streaming mode
-  - Added vector store integration for storing streaming responses
-- Improved environment variable handling:
-  - Fixed model configuration in .env file
-  - Created separate variables for OpenAI and Anthropic model configurations
-  - Updated docker-compose.yml to pass the correct environment variables
-  - Made the configuration more explicit and easier to understand
-- Enhanced executive integration:
-  - Implemented parallel processing of executive evaluations
-  - Added support for interruptions during streaming
-  - Improved handling of executive responses in non-streaming mode
-  - Made the executive service optional for easier testing
+6. Enhance executive service:
+   - Focus role on monitoring and knowledge organization
+   - Implement knowledge graph maintenance and optimization
+   - Add project plan compilation functionality
+   - Improve interruption logic based on knowledge graph awareness
+   ✅ Completed: Updated executive server.js to use vector search
 
-## 2025-03-06 (Evening)
-- Implemented debug flag for the executive layer:
-  - Added DEBUG environment variable to control debug mode
-  - Modified speaker service to echo user queries in debug mode
-  - Enhanced executive interruptions to include debug information
-  - Added debug information to JSON mode responses
-  - Ensured debug information is properly formatted in both streaming and non-streaming modes
-- Implemented JSON mode support:
-  - Added proper handling of response_format parameter
-  - Implemented JSON parsing and validation
-  - Added support for streaming JSON responses
-  - Ensured compatibility with executive interruptions
-- Fixed embeddings endpoint issues:
-  - Ensured proper error handling when vector store is unavailable
-  - Improved error messages for better debugging
-- Replaced in-memory vector store with ChromaDB:
-  - Updated docker-compose.yml to include ChromaDB service
-  - Removed the separate vector_store service
-  - Integrated ChromaDB directly into the speaker service
-  - Added proper persistence for vector embeddings
-  - Simplified the architecture by removing unnecessary services
-  - Switched from OpenAI embeddings to ChromaDB's built-in default embedding function
-  - Established clear separation of concerns: speaker owns vector store, executive owns knowledge graph
-  - Updated speaker service to use port 8002 internally to avoid conflict with ChromaDB's default port 8000
+#### Phase 4: Docker and Configuration Updates
+7. Update docker-compose.yml:
+   - Remove ChromaDB service
+   - Update Neo4j configuration for vector support
+   - Adjust service dependencies
+   - Update environment variables
+   ✅ Completed: Updated docker-compose.yml with new configuration
 
-### Current Status:
-- Services start up correctly and can communicate with each other
-- Embeddings endpoint is fully functional with real embeddings
-- Chat completions endpoint uses actual LLMs to generate responses
-- Complex features (streaming, tool calling, JSON mode) are fully implemented
-- The system passes all tests with real LLM functionality
-- The executive layer successfully interrupts and provides knowledge when needed
-
-## 2025-03-07
-- Fixed speaker-executive interaction:
-  - Updated speaker service to send its output to the executive during streaming
-  - Modified executive service to evaluate the speaker's output in real-time
-  - Added support for both interruption and restart actions in streaming mode
-  - Created a debug endpoint for direct access to the executive when debug mode is enabled
-  - Improved executive evaluation to consider the speaker's current output
-  - Enhanced system prompts for more accurate intervention decisions
-- Added comprehensive testing for speaker-executive interaction:
-  - Created test_executive_interaction.js for automated testing
-  - Added test-interaction target to Makefile
-  - Created EXECUTIVE_INTERACTION.md documentation
-  - Added tests for correct information (no interruption)
-  - Added tests for incorrect information (with interruption)
-  - Added tests for streaming with interruption
-- Updated progress tracking and documentation
-
-## 2025-03-07 (Afternoon)
-- Simplified speaker-executive interaction:
-  - Removed unnecessary `/update_evaluation` endpoint from executive service
-  - Removed non-blocking updates from speaker service
-  - Streamlined the interaction flow to only use the main `/evaluate` endpoint
-  - Updated documentation to reflect the simplified architecture
-  - This simplification reduces complexity while maintaining all functionality
-
-## 2025-03-07 (Evening)
-- Fixed bug in speaker-executive interaction:
-  - Fixed "Assignment to constant variable" error in streaming mode
-  - Changed `executivePromise` from a constant parameter to a mutable variable
-  - This ensures the executive promise can be updated during streaming
-  - All tests now pass successfully
-
-## 2025-03-07 (Late Evening)
-- Improved testing approach for speaker-executive interaction:
-  - Replaced LLM-dependent tests with direct API calls to the executive
-  - Created mock speaker outputs with known correct and incorrect information
-  - Added simulated streaming test with progressive incorrect information
-  - Added test for the restart functionality with completely off-topic responses
-  - Included an optional integration test with the actual speaker API
-  - This approach is more reliable as it doesn't depend on LLMs generating incorrect information
-
-## 2025-03-07 (Night)
-- Fixed streaming restart functionality in speaker service:
-  - Previously, when the executive requested a restart during streaming, the speaker would stop the stream but not start a new one
-  - Now, the speaker properly creates a new set of messages with the knowledge document
-  - Starts a new stream with the updated messages
-  - Sends the new stream's output to the client
-  - This makes the streaming restart behavior match the non-streaming behavior
-
-- Simplified architecture by removing the API service:
-  - Made the speaker service the front-facing API
-  - Moved OpenAI-compatible endpoints to the speaker service
-  - Updated docker-compose.yml to reflect the new architecture
-  - Updated Dockerfile.speaker to expose port 3000 instead of 8000
-  - Removed unnecessary API service files and configuration
-
-- Implemented proper streaming in the speaker service:
-  - Used LangChain's streaming API with configuredLLM.stream()
-  - Properly mapped LangChain streaming chunks to OpenAI API format
-  - Added support for tool call chunks in streaming responses
-  - Implemented executive integration in streaming mode
-  - Added vector store integration for storing streaming responses
-
-- Improved environment variable handling:
-  - Fixed model configuration in .env file
-  - Created separate variables for OpenAI and Anthropic model configurations
-  - Updated docker-compose.yml to pass the correct environment variables
-  - Made the configuration more explicit and easier to understand
-
-- Enhanced executive integration:
-  - Implemented parallel processing of executive evaluations
-  - Added support for interruptions during streaming
-  - Improved handling of executive responses in non-streaming mode
-  - Made the executive service optional for easier testing
-
-- Next steps:
-  - ✅ Test the new architecture with real LLM calls
-  - ✅ Implement proper error handling for the new streaming implementation
-  - ✅ Implement debug flag for the executive layer
-  - ✅ Enhance the vector store integration for better RAG performance
-  - ✅ Implement Extended Response Mode
-  - Add comprehensive logging for debugging
-  - Optimize performance of the integrated system
-  - Improve the knowledge graph management
-  - Implement file processing and vision capabilities
-
-## 2025-03-12
-- Added Extended Response Mode design to design.txt:
-  - Documented the concept, features, and implementation approach
-  - Clarified how it integrates with the existing Executive Layer architecture
-  - Specified the API extension mechanism using the `extended_thread_id` parameter
-
-### Extended Response Mode Implementation Plan:
-
-#### Phase 1: Core Infrastructure
-1. Create thread storage mechanism:
-   - Implement a ThreadManager class to store and retrieve conversation threads
-   - Add methods for creating, updating, and retrieving threads by ID
-   - Implement thread expiration/cleanup mechanism to prevent memory leaks
-   - Add thread metadata tracking (creation time, last access, message count)
-
-2. Modify API endpoint to support extended mode:
-   - Update the chat completions endpoint to recognize the `extended_thread_id` parameter
-   - Add logic to retrieve existing thread history when an ID is provided
-   - Implement message appending for incremental updates
-   - Add validation for thread IDs and message formats
-
-#### Phase 2: Executive-First Flow
-3. Implement executive-first planning:
-   - Create a new endpoint in the executive service for generating response plans
-   - Modify the extended mode flow to have the executive create a plan before the speaker responds
-   - Ensure the progress document is created with the detailed plan
-   - Only allow the speaker to begin responding after the plan is created
-
-4. Create progress tracking system:
-   - Implement a ProgressTracker class for the executive layer
-   - Add methods to create, update, and read progress documents
-   - Create file storage for progress documents (one per thread)
-   - Implement logic to replace executive history with progress document references
-
-#### Phase 3: Context Management
-5. Implement dynamic summarization:
-   - Create a function to measure context window utilization
-   - Add a threshold trigger for when summarization should occur
-   - Implement the summarization logic in the executive layer
-   - Ensure the most recent N messages are preserved intact
-   - Replace older messages with the generated summary
-
-6. Disable vector store in extended mode:
-   - Add a flag to bypass vector store operations when in extended mode
-   - Update the speaker service to check this flag before vector store operations
-   - Ensure knowledge documents are still properly managed by the executive
-
-#### Phase 4: Integration and Optimization
-7. Implement thread persistence:
-   - Add database storage for threads to survive service restarts
-   - Implement thread serialization/deserialization
-   - Add configuration options for persistence settings
-
-8. Add monitoring and diagnostics:
-   - Create endpoints to view active threads and their status
-   - Add metrics for thread usage, summarization frequency, and context utilization
-   - Implement logging for extended mode operations
+8. Update environment configuration:
+   - Remove vector store related variables
+   - Add Neo4j vector configuration options
+   - Update documentation to reflect new configuration options
+   ✅ Completed: Added embedding model configuration to docker-compose.yml
 
 #### Phase 5: Testing and Documentation
-9. Create comprehensive tests:
-   - Unit tests for ThreadManager and ProgressTracker
-   - Integration tests for the extended mode API
-   - Performance tests for long-running conversations
-   - Edge case tests for context window management
+9. Create new test scripts:
+   - Test vector search capabilities in Neo4j
+   - Test hybrid query functionality
+   - Test knowledge organization features
+   - Test project continuity features
+   ✅ Completed: Created test_vector_search.js for testing vector capabilities
 
 10. Update documentation:
-    - Add extended mode section to README.md
-    - Create EXTENDED_MODE.md with detailed documentation
-    - Update API documentation to include the new parameter
-    - Add examples of extended mode usage
+    - Update README.md to reflect the new architecture
+    - Create KNOWLEDGE_GRAPH.md with detailed documentation on the vector-enhanced knowledge graph
+    - Update API documentation to include new knowledge query capabilities
+    - Add examples of semantic and hybrid queries
+    ✅ Completed: Updated README.md with new architecture details
 
 ### Implementation Notes:
-- The extended mode should be completely optional and not affect normal API usage
-- Thread storage should be memory-efficient to handle many concurrent threads
-- Summarization should be intelligent enough to preserve important context
-- Progress tracking should be robust against failures and provide clear status information
-- The implementation should follow the existing architectural patterns
-- Extended mode should work seamlessly with all existing features (tool calling, JSON mode, etc.)
-- The executive-first flow is critical for complex, long-running tasks
-- The progress document serves as both a planning tool and a reference for the executive
+- The vector-enhanced knowledge graph provides a more unified and powerful knowledge system
+- The simplified architecture reduces complexity and improves efficiency
+- The speaker can now directly query the knowledge graph using both semantic and structural patterns
+- The executive's role is focused on oversight and knowledge organization
+- Project continuity is enhanced through structured storage of design and progress information
+- The system maintains OpenAI API compatibility while providing enhanced capabilities
 
-## 2025-03-12 (Afternoon)
-- Updated Extended Response Mode design in design.txt:
-  - Added detailed description of the executive-first flow
-  - Clarified the role of the progress document in planning and tracking
-  - Added implementation flow section with step-by-step process
-  - Included example use cases for extended mode
+## 2025-03-13
+- Implemented vector embedding integration with Neo4j:
+  - Added Hugging Face transformers package for generating embeddings
+  - Implemented automatic embedding generation for node names
+  - Created vector indexes for all node types in Neo4j
+  - Added vector similarity search methods to Neo4jManager
+  - Added hybrid search combining vector similarity with graph structure
 
-- Revised implementation plan in progress.txt:
-  - Added a new phase for executive-first planning
-  - Reorganized tasks to prioritize the executive-first flow
-  - Added more detailed notes on the importance of this approach
+- Enhanced knowledge tools:
+  - Added knowledge_vector_search tool for semantic search
+  - Added knowledge_hybrid_search tool for combined semantic and structural search
+  - Updated tool schemas with detailed descriptions
+  - Improved error handling for embedding generation
+
+- Updated executive service:
+  - Modified searchKnowledgeGraph to use vector similarity instead of keyword matching
+  - Updated evaluateSpeaker to use the new vector search capabilities
+  - Improved updateKnowledgeGraph to use vector search for finding existing topics
+  - Removed restart capability, focusing only on interruption for course correction
+  - Updated system prompts to reflect the new capabilities
+
+- Updated speaker service:
+  - Removed ChromaDB integration
+  - Added direct knowledge graph query capabilities through the executive service
+  - Updated embeddings endpoint to use the executive service for generating embeddings
+  - Removed extended mode functionality
+  - Simplified the code by removing unnecessary components
+
+- Updated configuration:
+  - Added embedding model parameters to environment variables
+  - Updated Neo4j configuration for vector support
+  - Removed ChromaDB service and related configuration
+  - Updated package.json with new dependencies
+
+- Created comprehensive testing:
+  - Implemented test_vector_search.js for testing vector search capabilities
+  - Added tests for creating nodes with automatic vector embedding generation
+  - Added tests for vector similarity search
+  - Added tests for hybrid search combining vector similarity with graph structure
+
+- Updated documentation:
+  - Updated README.md to reflect the new architecture
+  - Removed references to vector store and extended mode
+  - Added information about vector-enhanced knowledge graph
+  - Updated environment variables and project structure sections
+  - Added examples of semantic and hybrid queries
+
+- Completed implementation:
+  ✅ Updated design document
+  ✅ Updated docker-compose.yml
+  ✅ Modified Neo4jManager.js
+  ✅ Enhanced knowledge-tools.js
+  ✅ Updated executive server.js
+  ✅ Updated speaker server.js
+  ✅ Updated package.json
+  ✅ Created test_vector_search.js
+  ✅ Updated README.md
+  ✅ Updated progress.txt
 
 - Next steps:
-  1. ✅ Implement the core infrastructure (ThreadManager, ProgressTracker)
-  2. ✅ Create the executive-first planning endpoint
-  3. ✅ Modify the extended mode flow to follow the new design
-  4. ✅ Implement context management and summarization
-  5. ✅ Add comprehensive testing and documentation
-
-## 2025-03-12 (Evening)
-- Implemented Extended Response Mode:
-  - Created ThreadManager class for storing and retrieving conversation threads
-  - Implemented ProgressTracker for managing progress documents
-  - Added ContextManager for handling context window management and summarization
-  - Modified the executive service to generate detailed response plans
-  - Updated the speaker service to follow the executive's plans
-  - Implemented the executive-first flow for new threads
-  - Added proper handling of follow-up messages as executive oversight
-  - Created comprehensive test script (test_extended_mode.js)
-  - Added detailed documentation in EXTENDED_MODE.md
-
-- Enhanced testing capabilities:
-  - Added functionality to save all responses to files for better debugging
-  - Implemented storage of both raw stream data and processed content
-  - Added progress document saving for easier inspection
-  - Created clear separation between test files and production storage
-
-- Fixed issues with the executive-first flow:
-  - Ensured the executive only creates plans for new threads
-  - Treated follow-up messages as another form of executive oversight
-  - Fixed duplicate message addition in existing threads
-  - Improved error handling and logging
-
-- Current status:
-  - Extended Response Mode is fully implemented and tested
-  - The executive-first flow works correctly for new threads
-  - Follow-up messages are properly handled without executive interruption
-  - Context management and summarization are working as expected
-  - All test cases pass successfully
-  - Documentation is complete and comprehensive
+  1. Implement project planning tools for the executive
+  2. Create KNOWLEDGE_GRAPH.md with detailed documentation
+  3. Enhance knowledge organization and restructuring capabilities
+  4. Add more comprehensive testing for the entire system

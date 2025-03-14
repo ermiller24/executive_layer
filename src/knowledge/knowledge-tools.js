@@ -12,10 +12,12 @@ let neo4jManager;
  * @param {string} url - Neo4j connection URL
  * @param {string} user - Neo4j username
  * @param {string} password - Neo4j password
+ * @param {string} embeddingModel - Hugging Face model name for embeddings
+ * @param {number} embeddingDimension - Dimension of the embedding vectors
  * @returns {Promise<void>}
  */
-async function initializeNeo4jManager(url, user, password) {
-  neo4jManager = new Neo4jManager(url, user, password);
+async function initializeNeo4jManager(url, user, password, embeddingModel = 'sentence-transformers/all-MiniLM-L6-v2', embeddingDimension = 384) {
+  neo4jManager = new Neo4jManager(url, user, password, embeddingModel, embeddingDimension);
   await neo4jManager.initializeSchema();
   console.log('Neo4j manager initialized successfully');
 }
@@ -168,6 +170,65 @@ const knowledgeTools = {
     } catch (error) {
       throw new Error(`Failed to execute query: ${error.message}`);
     }
+  },
+
+  /**
+   * Search for nodes similar to a text query using vector similarity
+   * @param {Object} args - Tool arguments
+   * @param {string} args.nodeType - The type of node to search for
+   * @param {string} args.text - The text to search for
+   * @param {number} args.limit - Maximum number of results to return
+   * @param {number} args.minSimilarity - Minimum similarity score (0-1)
+   * @returns {Promise<string>} - The search results
+   */
+  knowledge_vector_search: async (args) => {
+    const { nodeType, text, limit = 10, minSimilarity = 0.7 } = args;
+    
+    try {
+      return await getNeo4jManager().vectorSearch(
+        nodeType,
+        text,
+        limit,
+        minSimilarity
+      );
+    } catch (error) {
+      throw new Error(`Failed to perform vector search: ${error.message}`);
+    }
+  },
+
+  /**
+   * Perform a hybrid search combining vector similarity with graph structure
+   * @param {Object} args - Tool arguments
+   * @param {string} args.nodeType - The type of node to search for
+   * @param {string} args.text - The text to search for
+   * @param {string} args.relationshipType - The type of relationship to traverse
+   * @param {string} args.targetType - The type of target node
+   * @param {number} args.limit - Maximum number of results to return
+   * @param {number} args.minSimilarity - Minimum similarity score (0-1)
+   * @returns {Promise<string>} - The search results
+   */
+  knowledge_hybrid_search: async (args) => {
+    const { 
+      nodeType, 
+      text, 
+      relationshipType, 
+      targetType, 
+      limit = 10, 
+      minSimilarity = 0.7 
+    } = args;
+    
+    try {
+      return await getNeo4jManager().hybridSearch(
+        nodeType,
+        text,
+        relationshipType,
+        targetType,
+        limit,
+        minSimilarity
+      );
+    } catch (error) {
+      throw new Error(`Failed to perform hybrid search: ${error.message}`);
+    }
   }
 };
 
@@ -177,7 +238,7 @@ const knowledgeTools = {
 const knowledgeToolSchemas = {
   knowledge_create_node: {
     name: "knowledge_create_node",
-    description: "Create a node in the knowledge graph. Node types include: tag_category, tag, topic, knowledge. Each node has a name and description, and can optionally belong to other nodes. Knowledge nodes should have a summary.",
+    description: "Create a node in the knowledge graph. Node types include: tag_category, tag, topic, knowledge. Each node has a name and description, and can optionally belong to other nodes. Knowledge nodes should have a summary. Vector embeddings are automatically generated for the node name.",
     parameters: {
       type: "object",
       properties: {
@@ -258,7 +319,7 @@ const knowledgeToolSchemas = {
   
   knowledge_alter: {
     name: "knowledge_alter",
-    description: "Alter or delete a node in the knowledge graph. Can update fields or delete the node entirely.",
+    description: "Alter or delete a node in the knowledge graph. Can update fields or delete the node entirely. If the name field is updated, the vector embedding will be automatically regenerated.",
     parameters: {
       type: "object",
       properties: {
@@ -322,6 +383,75 @@ const knowledgeToolSchemas = {
         }
       },
       required: ["query"]
+    }
+  },
+
+  knowledge_vector_search: {
+    name: "knowledge_vector_search",
+    description: "Search for nodes similar to a text query using vector similarity. This tool uses the vector embeddings to find semantically similar nodes.",
+    parameters: {
+      type: "object",
+      properties: {
+        nodeType: {
+          type: "string",
+          description: "The type of node to search for (tag_category, tag, topic, knowledge)",
+          enum: ["tag_category", "tag", "topic", "knowledge"]
+        },
+        text: {
+          type: "string",
+          description: "The text to search for"
+        },
+        limit: {
+          type: "number",
+          description: "Maximum number of results to return",
+          default: 10
+        },
+        minSimilarity: {
+          type: "number",
+          description: "Minimum similarity score (0-1)",
+          default: 0.7
+        }
+      },
+      required: ["nodeType", "text"]
+    }
+  },
+
+  knowledge_hybrid_search: {
+    name: "knowledge_hybrid_search",
+    description: "Perform a hybrid search combining vector similarity with graph structure. This tool finds nodes that are both semantically similar to the query text and connected to other nodes through specific relationships.",
+    parameters: {
+      type: "object",
+      properties: {
+        nodeType: {
+          type: "string",
+          description: "The type of node to search for (tag_category, tag, topic, knowledge)",
+          enum: ["tag_category", "tag", "topic", "knowledge"]
+        },
+        text: {
+          type: "string",
+          description: "The text to search for"
+        },
+        relationshipType: {
+          type: "string",
+          description: "The type of relationship to traverse"
+        },
+        targetType: {
+          type: "string",
+          description: "The type of target node",
+          enum: ["tag_category", "tag", "topic", "knowledge"]
+        },
+        limit: {
+          type: "number",
+          description: "Maximum number of results to return",
+          default: 10
+        },
+        minSimilarity: {
+          type: "number",
+          description: "Minimum similarity score (0-1)",
+          default: 0.7
+        }
+      },
+      required: ["nodeType", "text", "relationshipType", "targetType"]
     }
   }
 };

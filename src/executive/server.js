@@ -22,9 +22,11 @@ const MODEL_KWARGS = process.env.EXECUTIVE_MODEL_KWARGS ? JSON.parse(process.env
 const NEO4J_URL = process.env.NEO4J_URL || 'bolt://neo4j:7687';
 const NEO4J_USER = process.env.NEO4J_USER || 'neo4j';
 const NEO4J_PASSWORD = process.env.NEO4J_PASSWORD || 'password';
+const EMBEDDING_MODEL = process.env.EMBEDDING_MODEL || 'sentence-transformers/all-MiniLM-L6-v2';
+const EMBEDDING_DIMENSION = parseInt(process.env.EMBEDDING_DIMENSION || '384');
 
-// Initialize the Neo4j manager
-initializeNeo4jManager(NEO4J_URL, NEO4J_USER, NEO4J_PASSWORD)
+// Initialize the Neo4j manager with embedding model parameters
+initializeNeo4jManager(NEO4J_URL, NEO4J_USER, NEO4J_PASSWORD, EMBEDDING_MODEL, EMBEDDING_DIMENSION)
   .then(() => console.log('Neo4j manager initialized successfully'))
   .catch(error => console.error('Failed to initialize Neo4j manager:', error));
 
@@ -63,6 +65,67 @@ if (DEBUG) {
         });
       }
       
+      // If tool_params is provided, directly call the appropriate knowledge tool
+      if (tool_params) {
+        console.log(`[DEBUG] Direct tool call with params:`, tool_params);
+        
+        // Try to determine the tool name from the query or tool_params
+        let toolName = null;
+        
+        // First, check if the query explicitly mentions a knowledge tool
+        const toolNameMatch = query.match(/knowledge_(\w+)/);
+        if (toolNameMatch) {
+          toolName = `knowledge_${toolNameMatch[1]}`;
+        } 
+        // If not, try to infer the tool from tool_params
+        else if (tool_params.query) {
+          // If tool_params has a query parameter, it's likely knowledge_unsafe_query
+          toolName = 'knowledge_unsafe_query';
+        } 
+        else if (tool_params.nodeType) {
+          // If tool_params has a nodeType parameter, determine the appropriate tool
+          if (tool_params.text && tool_params.relationshipType && tool_params.targetType) {
+            // If it has text, relationshipType, and targetType, it's likely knowledge_hybrid_search
+            toolName = 'knowledge_hybrid_search';
+          } 
+          else if (tool_params.text) {
+            // If it has text but no relationshipType, it's likely knowledge_vector_search
+            toolName = 'knowledge_vector_search';
+          } 
+          else if (tool_params.belongsTo) {
+            // If it has belongsTo, it's likely knowledge_create_node
+            toolName = 'knowledge_create_node';
+          } 
+          else {
+            // Default to knowledge_create_node for nodeType
+            toolName = 'knowledge_create_node';
+          }
+        }
+        
+        // Check if the tool exists
+        if (toolName && knowledgeTools[toolName]) {
+          try {
+            // Call the tool with the provided parameters
+            console.log(`[DEBUG] Calling tool ${toolName}`);
+            const result = await knowledgeTools[toolName](tool_params);
+            return res.json({ result });
+          } catch (toolError) {
+            console.error(`[DEBUG] Error calling tool ${toolName}:`, toolError);
+            return res.status(500).json({
+              error: {
+                message: `Error calling tool ${toolName}: ${toolError.message}`,
+                type: 'tool_error'
+              }
+            });
+          }
+        } else {
+          console.log(`[DEBUG] No matching tool found for params:`, tool_params);
+        }
+        
+        // If we couldn't determine a tool or the tool doesn't exist, fall back to LLM
+        console.log(`[DEBUG] No matching tool found, falling back to LLM`);
+      }
+      
       // Create a system prompt for direct querying
       const systemPrompt = `You are the Executive layer of an AI system. You have access to a knowledge graph and can use tools to interact with it.
       
@@ -72,6 +135,8 @@ You have access to the following tools to interact with the knowledge graph:
 - knowledge_alter: Alter or delete a node in the knowledge graph
 - knowledge_search: Search the knowledge graph using Cypher query components
 - knowledge_unsafe_query: Execute an arbitrary Cypher query against the Neo4j knowledge graph
+- knowledge_vector_search: Search for nodes similar to a text query using vector similarity
+- knowledge_hybrid_search: Perform a hybrid search combining vector similarity with graph structure
 
 Respond to the user's query using these tools as needed.`;
       
@@ -99,52 +164,6 @@ Respond to the user's query using these tools as needed.`;
     }
   });
 }
-
-// The update_evaluation endpoint has been removed as it was only used for logging
-// and didn't provide significant value to the system.
-// The executive now only receives updates through the main /evaluate endpoint.
-
-// Response plan endpoint for extended mode
-app.post('/generate_response_plan', async (req, res) => {
-  try {
-    console.log('[EXECUTIVE] Received request to generate response plan');
-    const { query, messages } = req.body;
-
-    console.log(`[EXECUTIVE] Query: ${query.substring(0, 50)}...`);
-    console.log(`[EXECUTIVE] Messages count: ${messages ? messages.length : 0}`);
-
-    if (!query || !messages || !Array.isArray(messages)) {
-      console.error('[EXECUTIVE] Invalid request parameters for response plan generation');
-      return res.status(400).json({
-        error: {
-          message: 'Invalid request parameters',
-          type: 'invalid_request_error',
-          param: null,
-          code: 'invalid_request'
-        }
-      });
-    }
-
-    // Generate a response plan
-    console.log('[EXECUTIVE] Generating response plan...');
-    const responsePlan = await generateResponsePlan(query, messages);
-    console.log(`[EXECUTIVE] Response plan generated (${responsePlan.length} chars)`);
-
-    // Return the response plan
-    res.json({ response_plan: responsePlan });
-    console.log('[EXECUTIVE] Response plan sent successfully');
-  } catch (error) {
-    console.error('[EXECUTIVE] Error generating response plan:', error);
-    res.status(500).json({
-      error: {
-        message: 'An error occurred during response plan generation',
-        type: 'server_error',
-        param: null,
-        code: 'internal_server_error'
-      }
-    });
-  }
-});
 
 // Evaluation endpoint
 app.post('/evaluate', async (req, res) => {
@@ -197,9 +216,6 @@ app.post('/evaluate', async (req, res) => {
       // Continue even if updating the knowledge graph fails
     }
 
-    // The executive no longer stores documents in the vector store
-    // The speaker is the sole owner of the vector store
-
     // Return the evaluation result
     res.json(evaluation);
   } catch (error) {
@@ -216,83 +232,127 @@ app.post('/evaluate', async (req, res) => {
 });
 
 /**
- * Search the knowledge graph for information relevant to the query
+ * Search the knowledge graph for information relevant to the query using vector similarity
  * @param {string} query - The user's query
  * @returns {Promise<Object>} - The knowledge document
  */
 async function searchKnowledgeGraph(query) {
   try {
-    // Extract keywords from the query (simple approach)
-    const keywords = query.toLowerCase()
-      .replace(/[^\w\s]/g, '')
-      .split(/\s+/)
-      .filter(word => word.length > 3);
+    // Use vector search to find topics related to the query
+    const topicSearchResult = await knowledgeTools.knowledge_vector_search({
+      nodeType: 'topic',
+      text: query,
+      limit: 5,
+      minSimilarity: 0.6
+    });
     
-    if (keywords.length === 0) {
-      return null;
-    }
+    const topicResults = JSON.parse(topicSearchResult);
     
-    // Use the knowledge_search tool to find topics related to the query
-    let topics = [];
-    
-    for (const keyword of keywords) {
-      const whereClause = `t.name CONTAINS "${keyword}" OR t.description CONTAINS "${keyword}"`;
-      const searchResult = await knowledgeTools.knowledge_search({
-        matchClause: '(t:Topic)',
-        whereClause: whereClause,
-        returnClause: 't.name AS name, t.description AS description, id(t) AS id',
-        params: {}
+    if (topicResults.length === 0) {
+      // If no topics found, try a more general search across all node types
+      const generalSearchResult = await knowledgeTools.knowledge_vector_search({
+        nodeType: 'knowledge',
+        text: query,
+        limit: 5,
+        minSimilarity: 0.5
       });
       
-      const results = JSON.parse(searchResult);
+      const generalResults = JSON.parse(generalSearchResult);
       
-      if (results.length > 0) {
-        topics = topics.concat(results.map(record => ({
-          id: record.id,
-          name: record.name,
-          description: record.description
-        })));
-      }
-    }
-    
-    // If we found topics, get related knowledge
-    if (topics.length > 0) {
-      const topicIds = topics.map(topic => topic.id);
-      
-      // Use the knowledge_search tool to find knowledge related to the topics
-      const whereClause = `id(t) IN [${topicIds.join(', ')}]`;
-      const searchResult = await knowledgeTools.knowledge_search({
-        matchClause: '(k:Knowledge)-[:BELONGS_TO]->(t:Topic)',
-        whereClause: whereClause,
-        returnClause: 'k.name AS name, k.summary AS summary, k.data AS content',
-        params: {}
-      });
-      
-      const results = JSON.parse(searchResult);
-      
-      if (results.length > 0) {
+      if (generalResults.length > 0) {
         // Compile the knowledge into a document
-        const knowledgeItems = results.map(record => ({
+        const knowledgeItems = generalResults.map(record => ({
           name: record.name,
-          summary: record.summary,
-          content: record.content
+          description: record.description,
+          score: record.score
         }));
         
         const document = {
-          topics: topics,
+          topics: [],
           knowledge: knowledgeItems,
           content: `Knowledge related to your query:\n\n${knowledgeItems.map(item => 
-            `${item.name}:\n${item.content || item.summary}`
+            `${item.name} (similarity: ${item.score.toFixed(2)}):\n${item.description}`
           ).join('\n\n')}`,
           isNew: false
         };
         
         return document;
       }
+      
+      return null;
     }
     
-    // If we didn't find anything, return null
-    return null;
+    // We found topics, now get related knowledge using hybrid search
+    const topics = topicResults.map(record => ({
+      id: record.id,
+      name: record.name,
+      description: record.description,
+      score: record.score
+    }));
+    
+    // For each topic, find related knowledge
+    let allKnowledgeItems = [];
+    
+    for (const topic of topics) {
+      try {
+        // Use hybrid search to find knowledge related to the topic
+        const hybridSearchResult = await knowledgeTools.knowledge_hybrid_search({
+          nodeType: 'topic',
+          text: topic.name,
+          relationshipType: 'BELONGS_TO',  // Updated to match the actual relationship type
+          targetType: 'knowledge',
+          limit: 5,
+          minSimilarity: 0.6
+        });
+        
+        const hybridResults = JSON.parse(hybridSearchResult);
+        
+        if (hybridResults.length > 0) {
+          // Add the knowledge items to our collection
+          const knowledgeItems = hybridResults.map(record => ({
+            name: record.target.name,
+            description: record.target.description,
+            score: record.score,
+            topicName: topic.name,
+            topicScore: topic.score
+          }));
+          
+          allKnowledgeItems = allKnowledgeItems.concat(knowledgeItems);
+        }
+      } catch (error) {
+        console.error(`Error in hybrid search for topic ${topic.name}:`, error);
+        // Continue with other topics
+      }
+    }
+    
+    // If we found knowledge items, compile them into a document
+    if (allKnowledgeItems.length > 0) {
+      // Sort by score (descending)
+      allKnowledgeItems.sort((a, b) => b.score - a.score);
+      
+      const document = {
+        topics: topics,
+        knowledge: allKnowledgeItems,
+        content: `Knowledge related to your query:\n\n${allKnowledgeItems.map(item => 
+          `${item.name} (from topic: ${item.topicName}, similarity: ${item.score.toFixed(2)}):\n${item.description}`
+        ).join('\n\n')}`,
+        isNew: false
+      };
+      
+      return document;
+    }
+    
+    // If we found topics but no knowledge, create a document with just the topics
+    const document = {
+      topics: topics,
+      knowledge: [],
+      content: `Topics related to your query:\n\n${topics.map(topic => 
+        `${topic.name} (similarity: ${topic.score.toFixed(2)}):\n${topic.description}`
+      ).join('\n\n')}`,
+      isNew: false
+    };
+    
+    return document;
   } catch (error) {
     console.error('Error searching knowledge graph:', error);
     return null;
@@ -317,7 +377,6 @@ You have access to a knowledge graph and can provide corrections or additional i
 Based on the user's query, the Speaker's output, and any knowledge you have, evaluate if the Speaker needs:
 1. No intervention (if the Speaker is doing well)
 2. An interruption (if the Speaker has made minor errors or is slightly off track)
-3. A restart (if the Speaker is substantially wrong or has seriously deviated from the task)
 
 You should be more likely to intervene if:
 - The Speaker contradicts information in the knowledge graph
@@ -331,12 +390,14 @@ You have access to the following tools to interact with the knowledge graph:
 - knowledge_alter: Alter or delete a node in the knowledge graph
 - knowledge_search: Search the knowledge graph using Cypher query components
 - knowledge_unsafe_query: Execute an arbitrary Cypher query against the Neo4j knowledge graph
+- knowledge_vector_search: Search for nodes similar to a text query using vector similarity
+- knowledge_hybrid_search: Perform a hybrid search combining vector similarity with graph structure
 
 Use these tools to update the knowledge graph with information from the conversation.
 
 Respond with a JSON object with the following structure:
 {
-  "action": "none" | "interrupt" | "restart",
+  "action": "none" | "interrupt",
   "reason": "Explanation of your decision",
   "knowledge_document": "Additional information or corrections to provide to the Speaker"
 }`;
@@ -419,108 +480,6 @@ Respond with a JSON object with the following structure:
 }
 
 /**
- * Generate a response plan for a query
- * @param {string} query - The user's query
- * @param {Array} messages - The conversation messages
- * @returns {Promise<string>} - The generated response plan
- */
-async function generateResponsePlan(query, messages) {
-  try {
-    console.log('[EXECUTIVE] generateResponsePlan called');
-    console.log(`[EXECUTIVE] Query: ${query}`);
-    console.log(`[EXECUTIVE] Messages count: ${messages.length}`);
-    
-    // Search the knowledge graph for relevant information
-    let knowledgeDocument;
-    try {
-      console.log('[EXECUTIVE] Searching knowledge graph for response plan');
-      knowledgeDocument = await searchKnowledgeGraph(query);
-      console.log('[EXECUTIVE] Knowledge graph search completed');
-      if (knowledgeDocument) {
-        console.log('[EXECUTIVE] Knowledge document found');
-      } else {
-        console.log('[EXECUTIVE] No knowledge document found');
-      }
-    } catch (error) {
-      console.error('[EXECUTIVE] Error searching knowledge graph for response plan:', error);
-      knowledgeDocument = null;
-    }
-
-    // Prepare the system prompt for the executive
-    console.log('[EXECUTIVE] Preparing system prompt');
-    const systemPrompt = `You are the Executive layer of an AI system. Your job is to create a detailed, structured response plan for the Speaker (the user-facing AI) to follow when responding to the user's query.
-
-This is for Extended Response Mode, where you (the Executive) create a comprehensive plan BEFORE the Speaker begins responding. The Speaker will follow your plan step by step.
-
-The response plan should:
-1. Break down the query into its key components and objectives
-2. Outline the main points that should be covered in the response, in a logical sequence
-3. Provide a clear, step-by-step structure for the response (numbered sections and subsections)
-4. Specify what research or knowledge is needed for each section
-5. Identify any potential challenges or areas where the Speaker might need additional information
-6. Provide guidance on tone, style, and level of detail appropriate for this query
-7. Include specific instructions for complex parts of the response
-8. Suggest examples, analogies, or illustrations where appropriate
-
-Format your response plan as a structured Markdown document with:
-- A title that reflects the user's query
-- Clear section headings and subheadings
-- Numbered steps or bullet points for clarity
-- Specific instructions for the Speaker at each step
-
-This response plan will be used to guide the Speaker's response and will be stored in a progress document for reference during extended conversations. Be thorough and specific, as this plan will help maintain coherence in long conversations.
-
-You have access to the following tools to interact with the knowledge graph:
-- knowledge_create_node: Create a node in the knowledge graph
-- knowledge_create_edge: Create an edge between nodes in the knowledge graph
-- knowledge_alter: Alter or delete a node in the knowledge graph
-- knowledge_search: Search the knowledge graph using Cypher query components
-- knowledge_unsafe_query: Execute an arbitrary Cypher query against the Neo4j knowledge graph
-
-Use these tools to gather information from the knowledge graph if needed.`;
-
-    // Prepare the user message
-    console.log('[EXECUTIVE] Preparing user message');
-    let userMessage = `User Query: ${query}\n\nConversation History:\n`;
-    
-    // Add the conversation history
-    for (const message of messages) {
-      userMessage += `${message.role.toUpperCase()}: ${message.content}\n\n`;
-    }
-    
-    // Add the knowledge document if available
-    if (knowledgeDocument) {
-      userMessage += `\nRelevant Knowledge:\n${knowledgeDocument.content}\n\n`;
-    } else {
-      userMessage += `\nNo relevant knowledge found in the knowledge graph.\n\n`;
-    }
-    
-    userMessage += `Create a detailed, structured response plan for addressing this query. Remember, you are creating a plan for the Speaker to follow, not writing the actual response. Be specific and thorough, as this plan will guide the Speaker's response and help maintain coherence in long conversations.`;
-
-    // Create a runnable sequence
-    console.log('[EXECUTIVE] Creating runnable sequence');
-    const chain = RunnableSequence.from([
-      llm,
-      new StringOutputParser()
-    ]);
-
-    // Invoke the chain
-    console.log('[EXECUTIVE] Invoking LLM chain');
-    const result = await chain.invoke([
-      { type: 'system', content: systemPrompt },
-      { type: 'human', content: userMessage }
-    ]);
-    console.log(`[EXECUTIVE] LLM chain result received (${result.length} chars)`);
-    console.log(`[EXECUTIVE] Result preview: ${result.substring(0, 100)}...`);
-
-    return result;
-  } catch (error) {
-    console.error('[EXECUTIVE] Error generating response plan:', error);
-    return `Error generating response plan: ${error.message}. Proceeding with default response.`;
-  }
-}
-
-/**
  * Update the knowledge graph based on the conversation
  * @param {string} query - The user's query
  * @param {Array} messages - The conversation messages
@@ -537,12 +496,12 @@ async function updateKnowledgeGraph(query, messages, knowledgeDocument) {
       return;
     }
     
-    // Check if we already have a topic for this query
-    const searchResult = await knowledgeTools.knowledge_search({
-      matchClause: '(t:Topic)',
-      whereClause: `t.name = "${query}"`,
-      returnClause: 't',
-      params: {}
+    // Check if we already have a topic for this query using vector search
+    const searchResult = await knowledgeTools.knowledge_vector_search({
+      nodeType: 'topic',
+      text: query,
+      limit: 1,
+      minSimilarity: 0.9  // High similarity threshold for exact matches
     });
     
     const results = JSON.parse(searchResult);
@@ -560,7 +519,7 @@ async function updateKnowledgeGraph(query, messages, knowledgeDocument) {
       const idMatch = createResult.match(/ID: (\d+)/);
       topicId = idMatch ? parseInt(idMatch[1]) : null;
     } else {
-      topicId = results[0].t.id;
+      topicId = results[0].id;
     }
     
     if (topicId) {
@@ -573,7 +532,10 @@ async function updateKnowledgeGraph(query, messages, knowledgeDocument) {
         nodeType: 'knowledge',
         name: knowledgeName,
         description: knowledgeData,
-        summary: knowledgeSummary,
+        additionalFields: {
+          summary: knowledgeSummary,
+          data: knowledgeData
+        },
         belongsTo: [
           {
             type: 'topic',

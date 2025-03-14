@@ -10,17 +10,17 @@
     "test": "node --experimental-specifier-resolution=node test_api.js"
   },
   "dependencies": {
+    "@huggingface/transformers": "^3.4.0",
     "@langchain/openai": "^0.0.14",
     "@langchain/anthropic": "^0.3.14",
     "axios": "^1.6.2",
     "dotenv": "^16.3.1",
     "express": "^4.18.2",
     "langchain": "^0.3.0",
-    "neo4j-driver": "^5.15.0",
+    "neo4j-driver": "^5.26.0",
     "hnswlib-node": "^1.4.2",
     "sqlite3": "^5.1.6",
-    "sqlite": "^5.1.1",
-    "chromadb": "^1.7.1"
+    "sqlite": "^5.1.1"
   },
   "devDependencies": {
     "jest": "^29.7.0",

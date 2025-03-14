@@ -9,30 +9,25 @@ ExL operates by running two LLM instances simultaneously:
 1. **Speaker Layer**: The forward-facing model that the user interacts with, providing chat, tool calls, etc.
 2. **Executive Layer**: Provides support for the speaker, monitoring its output and providing corrections or additional information as needed.
 
-Additional components:
-- **Knowledge Graph**: Implemented in Neo4j, stores structured knowledge that the Executive can query and update.
-- **Vector Store**: Stores embeddings of previous conversations and knowledge documents for quick retrieval.
+Additional component:
+- **Vector-Enhanced Knowledge Graph**: Implemented in Neo4j with integrated vector embeddings, stores structured knowledge that both the Executive and Speaker can query and update. Combines semantic search capabilities with graph structure for powerful knowledge retrieval.
 
 ## Flow
 
 1. User sends a prompt to the OpenAI-compatible endpoint.
-2. The prompt is passed to the Vector Store to retrieve relevant context.
-3. The Speaker LLM processes the prompt with the context and streams back results to the user.
-4. Simultaneously, the Executive LLM searches the Knowledge Graph for relevant information.
-5. The Executive evaluates the Speaker's output and decides whether to:
+2. The Speaker LLM begins processing the prompt and streams back results to the user.
+3. Simultaneously, the Executive LLM searches the Knowledge Graph for relevant information using vector similarity and graph structure.
+4. The Executive evaluates the Speaker's output and decides whether to:
    - Let it continue (if correct)
    - Interrupt with insights (if slightly off track)
-   - Restart with new knowledge (if substantially wrong)
-6. The Executive updates the Knowledge Graph based on the conversation.
-7. The knowledge document is stored in the Vector Store for future reference.
+5. The Executive updates the Knowledge Graph based on the conversation, automatically generating vector embeddings for new knowledge.
+6. Project information is stored in the Knowledge Graph for continuity across sessions.
 
 ## Components
 
-- **API Bridge**: Provides an OpenAI-compatible API for applications to interact with ExL.
-- **Speaker Service**: Handles generating responses to user queries.
+- **Speaker Service**: Handles generating responses to user queries and serves as the front-facing API.
 - **Executive Service**: Monitors the Speaker, provides corrections, and manages the Knowledge Graph.
-- **Vector Store Service**: Stores and retrieves embeddings for quick context retrieval.
-- **Neo4j**: Stores the Knowledge Graph.
+- **Neo4j**: Stores the Knowledge Graph with integrated vector embeddings for semantic search.
 - **Python Chatbot**: A simple command-line interface for interacting with the ExL system.
 
 ## Supported OpenAI API Features
@@ -44,7 +39,6 @@ ExL implements all critical OpenAI API features:
 - **Streaming**: Stream responses token by token in real-time.
 - **Tool Calling**: Allow the model to call external tools/functions.
 - **JSON Mode**: Generate structured JSON responses.
-- **Extended Response Mode**: Handle long-running conversations with automatic context management (see [EXTENDED_MODE.md](EXTENDED_MODE.md)).
 
 ## Setup
 
@@ -64,19 +58,17 @@ Create a `.env` file with the following variables:
 API_PORT=3000
 
 # Speaker LLM Configuration
-SPEAKER_PORT=8000
+SPEAKER_PORT=8002
 SPEAKER_MODEL=gpt-4o
-SPEAKER_API_KEY=your_openai_api_key_here
+SPEAKER_MODEL_KWARGS={}
+DEFAULT_API_KEY=your_openai_api_key_here
 
 # Executive LLM Configuration
 EXECUTIVE_PORT=8001
 EXECUTIVE_MODEL=gpt-4o
-EXECUTIVE_API_KEY=your_openai_api_key_here
-
-# Vector Store Configuration
-VECTOR_STORE_PORT=8002
-VECTOR_STORE_DIMENSION=1536
-VECTOR_STORE_PATH=/data/vector_store
+EXECUTIVE_MODEL_KWARGS={}
+EMBEDDING_MODEL=sentence-transformers/all-MiniLM-L6-v2
+EMBEDDING_DIMENSION=384
 
 # Neo4j Configuration
 NEO4J_URL=bolt://neo4j:7687
@@ -87,14 +79,8 @@ NEO4J_PASSWORD=password
 ExL_API_URL=http://localhost:3000
 ExL_API_KEY=dummy-api-key
 
-# Extended Mode Configuration (optional)
-DATA_DIR=/data/extended
-EXTENDED_MAX_CONTEXT_SIZE=16000
-EXTENDED_SUMMARIZATION_THRESHOLD=0.7
-EXTENDED_PRESERVE_MESSAGE_COUNT=4
-EXTENDED_EXPIRATION_TIME=86400000
-EXTENDED_CLEANUP_INTERVAL=3600000
-EXTENDED_SUMMARY_MODEL=openai:gpt-3.5-turbo
+# Debug Configuration
+DEBUG=false
 ```
 
 ### Quick Start with Make
@@ -185,17 +171,14 @@ The main test script verifies all critical OpenAI API features:
 
 Additional test scripts are available for specific components:
 ```bash
-# Test vector store integration
-make test-vector
-
 # Test knowledge graph integration
 make test-exec
 
 # Test speaker-executive interaction
 make test-interaction
 
-# Test extended response mode
-make test-extended
+# Test vector search capabilities
+make test-vector-search
 ```
 
 ## API Usage
@@ -334,60 +317,6 @@ const jsonData = JSON.parse(result.choices[0].message.content);
 console.log(jsonData);
 ```
 
-### Extended Response Mode
-
-```javascript
-// Initial request with extended_thread_id
-const initialResponse = await fetch('http://localhost:3000/v1/chat/completions', {
-  method: 'POST',
-  headers: {
-    'Content-Type': 'application/json'
-  },
-  body: JSON.stringify({
-    model: 'eir-default',
-    messages: [
-      { role: 'system', content: 'You are a helpful assistant.' },
-      { role: 'user', content: 'Tell me about quantum computing.' }
-    ],
-    temperature: 0.7,
-    extended_thread_id: 'conversation-123' // Enable extended mode with a thread ID
-  })
-});
-
-const initialResult = await initialResponse.json();
-console.log(initialResult.choices[0].message.content);
-
-// Follow-up request with the same thread ID (only need to send new messages)
-const followUpResponse = await fetch('http://localhost:3000/v1/chat/completions', {
-  method: 'POST',
-  headers: {
-    'Content-Type': 'application/json'
-  },
-  body: JSON.stringify({
-    model: 'eir-default',
-    messages: [
-      { role: 'user', content: 'How does quantum entanglement work?' }
-    ],
-    temperature: 0.7,
-    extended_thread_id: 'conversation-123' // Same thread ID as before
-  })
-});
-
-const followUpResult = await followUpResponse.json();
-console.log(followUpResult.choices[0].message.content);
-
-// Get the progress document for the thread
-const progressResponse = await fetch('http://localhost:3000/v1/extended/progress/conversation-123', {
-  method: 'GET',
-  headers: {
-    'Content-Type': 'application/json'
-  }
-});
-
-const progressResult = await progressResponse.json();
-console.log(progressResult.progress_document);
-```
-
 ## Development
 
 ### Project Structure
@@ -402,26 +331,18 @@ executive_layer/
 ├── requirements.txt        # Python dependencies for the chatbot
 ├── .env                    # Environment variables
 ├── chatbot.py              # Python chatbot for interacting with ExL
-├── EXTENDED_MODE.md        # Documentation for Extended Response Mode
 ├── src/
 │   ├── speaker/            # Speaker LLM service (front-facing API)
 │   │   └── server.js       # Speaker server
 │   ├── executive/          # Executive LLM service
 │   │   └── server.js       # Executive server
-│   ├── extended/           # Extended Response Mode implementation
-│   │   ├── thread-manager.js    # Thread storage and management
-│   │   ├── progress-tracker.js  # Progress document management
-│   │   ├── context-manager.js   # Context window management
-│   │   ├── extended-mode.js     # Main extended mode implementation
-│   │   └── index.js             # Module exports
 │   └── knowledge/          # Knowledge graph implementation
 │       ├── knowledge-tools.js   # Knowledge graph tools
-│       └── neo4j-manager.js     # Neo4j database manager
+│       └── neo4j-manager.js     # Neo4j database manager with vector capabilities
 ├── test_api.js             # API test script
-├── test_vector_store.js    # Vector store integration test
 ├── test_knowledge_graph.js # Knowledge graph integration test
 ├── test_executive_interaction.js # Executive interaction test
-└── test_extended_mode.js   # Extended mode test
+└── test_vector_search.js   # Vector search capabilities test
 ```
 
 ### Local Development
@@ -469,10 +390,9 @@ The project includes a Makefile with the following commands:
 - `make restart` - Restart all services
 - `make logs` - View logs from all services
 - `make test` - Run the test script
-- `make test-vector` - Run vector store integration test
 - `make test-exec` - Run knowledge graph integration test
 - `make test-interaction` - Run speaker-executive interaction test
-- `make test-extended` - Run extended mode test
+- `make test-vector-search` - Run vector search capabilities test
 - `make clean` - Remove containers and volumes
 - `make build` - Build all Docker images
 - `make status` - Check the status of all services
@@ -482,7 +402,6 @@ The project includes a Makefile with the following commands:
 - `make chatbot` - Run the Python chatbot
 - `make logs-speaker` - View logs from the Speaker service
 - `make logs-executive` - View logs from the Executive service
-- `make logs-vector-store` - View logs from the Vector Store service
 - `make logs-neo4j` - View logs from the Neo4j service
 
 ## Future Extensions
@@ -492,3 +411,5 @@ Potential extensions (not yet implemented):
 - Different models for Speaker and Executive
 - Multiple Executive models running simultaneously
 - File processing and vision capabilities
+- Advanced knowledge organization and restructuring tools
+- Project planning and tracking capabilities
